@@ -403,17 +403,21 @@ public class GroupMetricsPortlet extends EnhancedVLayout implements CustomSettin
                                                         link.setClipValue(true);
                                                         link.setWrap(true);
                                                         link.setHeight(26);
-                                                        link.addClickHandler(new ClickHandler() {
-                                                            @Override
-                                                            public void onClick(ClickEvent event) {
-                                                                ChartViewWindow window = new ChartViewWindow(title);
-                                                                CompositeGroupD3GraphListView graph = new CompositeGroupMultiLineGraphListView(
-                                                                    groupId, md.getId());
-                                                                window.addItem(graph);
-                                                                graph.populateData();
-                                                                window.show();
-                                                            }
-                                                        });
+                                                        if(!BrowserUtility.isBrowserPreIE9()){
+                                                            link.addClickHandler(new ClickHandler() {
+                                                                @Override
+                                                                public void onClick(ClickEvent event) {
+                                                                    ChartViewWindow window = new ChartViewWindow(title);
+                                                                    CompositeGroupD3GraphListView graph = new CompositeGroupMultiLineGraphListView(
+                                                                        groupId, md.getId());
+                                                                    window.addItem(graph);
+                                                                    graph.populateData();
+                                                                    window.show();
+                                                                }
+                                                            });
+                                                        } else {
+                                                            link.disable();
+                                                        }
 
                                                         //@todo: this goes away once we have validated the new d3 charts
                                                         final String destination = "/resource/common/monitor/Visibility.do?mode=chartSingleMetricMultiResource&groupId="
