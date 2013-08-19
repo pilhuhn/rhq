@@ -7,7 +7,6 @@ import com.datastax.driver.core.exceptions.NoHostAvailableException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
-import org.rhq.enterprise.server.cloud.StorageNodeManagerLocal;
 import org.rhq.enterprise.server.util.LookupUtil;
 import org.rhq.server.metrics.StorageStateListener;
 
@@ -30,12 +29,8 @@ public class StorageClusterMonitor implements StorageStateListener {
 
         isClusterAvailable = true;
 
-        StorageNodeManagerLocal storageNodeManager = LookupUtil.getStorageNodeManager();
-        if (storageNodeManager.isAddNodeMaintenanceInProgress()) {
-            log.info("Scheduling cluster maintenance...");
-            StorageNodeOperationsHandlerLocal storageOperationsHandler = LookupUtil.getStorageNodeOperationsHandler();
-            storageOperationsHandler.performAddNodeMaintenance(address);
-        }
+        StorageNodeOperationsHandlerLocal storageOperationsHandler = LookupUtil.getStorageNodeOperationsHandler();
+        storageOperationsHandler.performAddNodeMaintenanceIfNecessary(address);
     }
 
     @Override
@@ -46,6 +41,8 @@ public class StorageClusterMonitor implements StorageStateListener {
     @Override
     public void onStorageNodeRemoved(InetAddress address) {
         log.info("Storage node at " + address.getHostAddress() + " has been removed from the cluster");
+        StorageNodeOperationsHandlerLocal storageNodeOperationsHandler = LookupUtil.getStorageNodeOperationsHandler();
+        storageNodeOperationsHandler.performRemoveNodeMaintenanceIfNecessary(address);
     }
 
     @Override

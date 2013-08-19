@@ -1,13 +1,14 @@
 package org.rhq.enterprise.server.storage;
 
 import java.net.InetAddress;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import javax.ejb.Asynchronous;
 import javax.ejb.EJB;
 import javax.ejb.Stateless;
+import javax.ejb.TransactionAttribute;
+import javax.ejb.TransactionAttributeType;
 import javax.persistence.EntityManager;
 import javax.persistence.PersistenceContext;
 
@@ -15,23 +16,25 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import org.rhq.core.domain.auth.Subject;
+import org.rhq.core.domain.cloud.StorageClusterSettings;
 import org.rhq.core.domain.cloud.StorageNode;
 import org.rhq.core.domain.common.JobTrigger;
 import org.rhq.core.domain.configuration.Configuration;
-import org.rhq.core.domain.configuration.Property;
 import org.rhq.core.domain.configuration.PropertyList;
 import org.rhq.core.domain.configuration.PropertySimple;
-import org.rhq.core.domain.operation.OperationDefinition;
 import org.rhq.core.domain.operation.OperationHistory;
 import org.rhq.core.domain.operation.ResourceOperationHistory;
 import org.rhq.core.domain.operation.bean.ResourceOperationSchedule;
 import org.rhq.core.domain.resource.Resource;
 import org.rhq.core.domain.resource.ResourceType;
 import org.rhq.core.util.StringUtil;
+import org.rhq.core.util.exception.ThrowableUtil;
 import org.rhq.enterprise.server.RHQConstants;
+import org.rhq.enterprise.server.auth.SessionManager;
 import org.rhq.enterprise.server.auth.SubjectManagerLocal;
 import org.rhq.enterprise.server.cloud.StorageNodeManagerLocal;
 import org.rhq.enterprise.server.operation.OperationManagerLocal;
+import org.rhq.enterprise.server.resource.ResourceManagerLocal;
 import org.rhq.server.metrics.StorageSession;
 
 /**
@@ -68,60 +71,191 @@ public class StorageNodeOperationsHandlerBean implements StorageNodeOperationsHa
     @EJB
     private StorageClientManagerBean storageClientManager;
 
+    @EJB
+    private StorageNodeOperationsHandlerLocal storageNodeOperationsHandler;
+
+    @EJB
+    private ResourceManagerLocal resourceManager;
+
     @Override
-    public void announceNewStorageNode(StorageNode newStorageNode, StorageNode clusterNode, PropertyList addresses) {
+    public void announceStorageNode(Subject subject, StorageNode storageNode) {
         if (log.isInfoEnabled()) {
-            log.info("Announcing new storage node " + newStorageNode + " to cluster node " + clusterNode);
+            log.info("Announcing " + storageNode + " to storage node cluster.");
         }
-        Subject overlord = subjectManager.getOverlord();
-        ResourceOperationSchedule schedule = new ResourceOperationSchedule();
-        schedule.setResource(clusterNode.getResource());
-        schedule.setJobTrigger(JobTrigger.createNowTrigger());
-        schedule.setSubject(overlord);
-        schedule.setOperationName("updateKnownNodes");
+        storageNode.setOperationMode(StorageNode.OperationMode.ANNOUNCE);
+        List<StorageNode> clusterNodes = entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE,
+            StorageNode.class).setParameter("operationMode", StorageNode.OperationMode.NORMAL).getResultList();
+        List<StorageNode> allNodes = new ArrayList<StorageNode>(clusterNodes);
+        allNodes.add(storageNode);
+
+        for (StorageNode clusterNode : clusterNodes) {
+            clusterNode.setMaintenancePending(true);
+        }
+
+        announceStorageNode(subject, storageNode, clusterNodes.get(0), createPropertyListOfAddresses("addresses",
+            allNodes));
+
+    }
+
+    private void announceStorageNode(Subject subject, StorageNode newStorageNode, StorageNode clusterNode,
+        PropertyList addresses) {
+        if (log.isInfoEnabled()) {
+            log.info("Announcing " + newStorageNode + " to cluster node " + clusterNode);
+        }
+
         Configuration parameters = new Configuration();
         parameters.put(addresses);
-        schedule.setParameters(parameters);
 
-        operationManager.scheduleResourceOperation(overlord, schedule);
+        scheduleOperation(subject, clusterNode, parameters, "announce");
     }
 
     @Override
-    public void performAddNodeMaintenance(InetAddress storageNodeAddress) {
-        StorageNode storageNode = entityManager.createNamedQuery(StorageNode.QUERY_FIND_BY_ADDRESS,
-            StorageNode.class).setParameter("address", storageNodeAddress.getHostAddress()).getSingleResult();
-        storageNode.setOperationMode(StorageNode.OperationMode.ADD_NODE_MAINTENANCE);
+    public void unannounceStorageNode(Subject subject, StorageNode storageNode) {
+        log.info("Unannouncing " + storageNode);
 
+        storageNode.setOperationMode(StorageNode.OperationMode.UNANNOUNCE);
         List<StorageNode> clusterNodes = entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE,
-            StorageNode.class).setParameter("operationMode", StorageNode.OperationMode.ADD_NODE_MAINTENANCE)
-            .getResultList();
-
-        boolean runRepair = updateSchemaIfNecessary(clusterNodes);
-
-        performAddNodeMaintenance(storageNode, runRepair, createPropertyListOfAddresses(SEEDS_LIST, clusterNodes));
+            StorageNode.class).setParameter("operationMode", StorageNode.OperationMode.NORMAL).getResultList();
+        for (StorageNode clusterNode : clusterNodes) {
+            clusterNode.setMaintenancePending(true);
+        }
+        unannounceStorageNode(subject, clusterNodes.get(0), createPropertyListOfAddresses("addresses", clusterNodes));
     }
 
-    private void performAddNodeMaintenance(StorageNode storageNode, boolean runRepair, PropertyList seedsList) {
+    private void unannounceStorageNode(Subject subject, StorageNode clusterNode, PropertyList addresses) {
+        Configuration parameters = new Configuration();
+        parameters.put(addresses);
+
+        scheduleOperation(subject, clusterNode, parameters, "unannounce");
+    }
+
+    @Override
+    public void uninstall(Subject subject, StorageNode storageNode) {
+        log.info("Uninstalling " + storageNode);
+
+        storageNode.setOperationMode(StorageNode.OperationMode.UNINSTALL);
+
+        if (storageNode.getResource() == null) {
+            finishUninstall(subject, storageNode);
+        } else {
+            scheduleOperation(subject, storageNode, new Configuration(), "uninstall");
+        }
+    }
+
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void detachFromResource(StorageNode storageNode) {
+        storageNode.setResource(null);
+        storageNode.setFailedOperation(null);
+    }
+
+    @Override
+    public void decommissionStorageNode(Subject subject, StorageNode storageNode) {
+        log.info("Preparing to decommission " + storageNode);
+
+        storageNode.setOperationMode(StorageNode.OperationMode.DECOMMISSION);
+        List<StorageNode> storageNodes = entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE,
+            StorageNode.class).setParameter("operationMode", StorageNode.OperationMode.NORMAL).getResultList();
+        storageNodes.add(storageNode);
+
+        boolean runRepair = updateSchemaIfNecessary(storageNodes);
+        // This is a bit of a hack since the maintenancePending flag is really intended to
+        // queue up storage nodes during cluster maintenance operations.
+        storageNode.setMaintenancePending(runRepair);
+
+        scheduleOperation(subject, storageNode, new Configuration(), "decommission");
+    }
+
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void logError(StorageNode.OperationMode newStorageNodeOperationMode, String error, Exception e) {
+        try {
+            StorageNode newStorageNode = findStorageNodeByMode(newStorageNodeOperationMode);
+            newStorageNode.setErrorMessage(error + " Check the server log for details. Root cause: " +
+                ThrowableUtil.getRootCause(e).getMessage());
+        } catch (Exception e1) {
+            log.error("Failed to log error against storage node", e);
+        }
+    }
+
+    @Override
+    public void performAddNodeMaintenanceIfNecessary(InetAddress storageNodeAddress) {
+        StorageNode storageNode = entityManager.createNamedQuery(StorageNode.QUERY_FIND_BY_ADDRESS,
+            StorageNode.class).setParameter("address", storageNodeAddress.getHostAddress()).getSingleResult();
+
+        if (storageNode.getOperationMode() == StorageNode.OperationMode.BOOTSTRAP) {
+            performAddNodeMaintenance(subjectManager.getOverlord(), storageNode);
+        } else {
+            log.info(storageNode + " has already been bootstrapped. Skipping add node maintenance.");
+        }
+    }
+
+    @Override
+    public void performAddNodeMaintenance(Subject subject, StorageNode storageNode) {
+        storageNode.setOperationMode(StorageNode.OperationMode.ADD_MAINTENANCE);
+        List<StorageNode> clusterNodes = entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE,
+            StorageNode.class).setParameter("operationMode", StorageNode.OperationMode.NORMAL)
+            .getResultList();
+        for (StorageNode node : clusterNodes) {
+            node.setMaintenancePending(true);
+        }
+        storageNode.setMaintenancePending(true);
+        clusterNodes.add(storageNode);
+        boolean runRepair = updateSchemaIfNecessary(clusterNodes);
+        performAddNodeMaintenance(subject, storageNode, runRepair, createPropertyListOfAddresses(SEEDS_LIST,
+            clusterNodes));
+    }
+
+    private void performAddNodeMaintenance(Subject subject, StorageNode storageNode, boolean runRepair,
+        PropertyList seedsList) {
         if (log.isInfoEnabled()) {
             log.info("Running addNodeMaintenance for storage node " + storageNode);
         }
+        Configuration params = new Configuration();
+        params.put(seedsList);
+        params.put(new PropertySimple(RUN_REPAIR_PROPERTY, runRepair));
+        params.put(new PropertySimple(UPDATE_SEEDS_LIST, Boolean.TRUE));
 
-        Subject overlord = subjectManager.getOverlord();
+        scheduleOperation(subject, storageNode, params, "addNodeMaintenance");
+    }
 
-        ResourceOperationSchedule schedule = new ResourceOperationSchedule();
-        schedule.setResource(storageNode.getResource());
-        schedule.setJobTrigger(JobTrigger.createNowTrigger());
-        schedule.setSubject(overlord);
-        schedule.setOperationName("addNodeMaintenance");
+    @Override
+    public void performRemoveNodeMaintenanceIfNecessary(InetAddress storageNodeAddress) {
+        StorageNode storageNode = entityManager.createNamedQuery(StorageNode.QUERY_FIND_BY_ADDRESS,
+            StorageNode.class).setParameter("address", storageNodeAddress.getHostAddress()).getSingleResult();
 
-        Configuration config = new Configuration();
-        config.put(seedsList);
-        config.put(new PropertySimple(RUN_REPAIR_PROPERTY, runRepair));
-        config.put(new PropertySimple(UPDATE_SEEDS_LIST, Boolean.TRUE));
+        if (storageNode.getOperationMode() == StorageNode.OperationMode.DECOMMISSION) {
+            storageNode.setOperationMode(StorageNode.OperationMode.REMOVE_MAINTENANCE);
+            performRemoveNodeMaintenance(subjectManager.getOverlord(), storageNode);
+        } else {
+            log.info("Remove node maintenance has already been run for " + storageNode);
+        }
+    }
 
-        schedule.setParameters(config);
+    @Override
+    public void performRemoveNodeMaintenance(Subject subject, StorageNode storageNode) {
+        List<StorageNode> clusterNodes = entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE,
+            StorageNode.class).setParameter("operationMode", StorageNode.OperationMode.NORMAL)
+            .getResultList();
+        for (StorageNode node : clusterNodes) {
+            node.setMaintenancePending(true);
+        }
+        boolean runRepair = storageNode.isMaintenancePending();
+        performRemoveNodeMaintenance(subjectManager.getOverlord(), clusterNodes.get(0), runRepair,
+            createPropertyListOfAddresses(SEEDS_LIST, clusterNodes));
+    }
 
-        operationManager.scheduleResourceOperation(overlord, schedule);
+    private void performRemoveNodeMaintenance(Subject subject, StorageNode storageNode, boolean runRepair,
+        PropertyList seedsList) {
+        if (log.isInfoEnabled()) {
+            log.info("Running remove node maintenance for storage node " + storageNode);
+        }
+        Configuration params = new Configuration();
+        params.put(seedsList);
+        params.put(new PropertySimple(RUN_REPAIR_PROPERTY, runRepair));
+        params.put(new PropertySimple(UPDATE_SEEDS_LIST, true));
+
+        scheduleOperation(subject, storageNode, params, "removeNodeMaintenance");
     }
 
     @Override
@@ -131,39 +265,158 @@ public class StorageNodeOperationsHandlerBean implements StorageNodeOperationsHa
             return;
         }
 
-        ResourceOperationHistory resourceOperationHistory = entityManager.find(ResourceOperationHistory.class,
-            operationHistory.getId());
-        if (resourceOperationHistory == null) {
+        ResourceOperationHistory resourceOperationHistory = (ResourceOperationHistory) operationHistory;
+        if (!isStorageNodeOperation(resourceOperationHistory)) {
             return;
         }
 
-        if (isStorageNodeOperation(resourceOperationHistory.getOperationDefinition())) {
-            if (resourceOperationHistory.getOperationDefinition().getName().equals("updateKnownNodes")) {
-                handleUpdateKnownNodes(resourceOperationHistory);
-            } else if (operationHistory.getOperationDefinition().getName().equals("prepareForBootstrap")) {
-                handlePrepareForBootstrap(resourceOperationHistory);
-            } else if (operationHistory.getOperationDefinition().getName().equals("addNodeMaintenance")) {
-                handleAddNodeMaintenance(resourceOperationHistory);
+        if (resourceOperationHistory.getOperationDefinition().getName().equals("announce")) {
+            try {
+                storageNodeOperationsHandler.handleAnnounce(resourceOperationHistory);
+            } catch (Exception e) {
+                String msg = "Aborting storage node deployment due to unexpected error while announcing cluster nodes.";
+                log.error(msg, e);
+                storageNodeOperationsHandler.logError(StorageNode.OperationMode.ANNOUNCE, msg, e);
+            }
+        } else if (operationHistory.getOperationDefinition().getName().equals("prepareForBootstrap")) {
+            try {
+                storageNodeOperationsHandler.handlePrepareForBootstrap(resourceOperationHistory);
+            } catch (Exception e) {
+                String msg = "Aborting storage node deployment due to unexpected error while bootstrapping new node.";
+                log.error(msg, e);
+                storageNodeOperationsHandler.logError(StorageNode.OperationMode.BOOTSTRAP, msg, e);
+            }
+        } else if (operationHistory.getOperationDefinition().getName().equals("addNodeMaintenance")) {
+            try {
+                storageNodeOperationsHandler.handleAddNodeMaintenance(resourceOperationHistory);
+            } catch (Exception e) {
+                String msg = "Aborting storage node deployment due to unexpected error while performing add node " +
+                    "maintenance.";
+                log.error(msg, e);
+                storageNodeOperationsHandler.logError(StorageNode.OperationMode.ADD_MAINTENANCE, msg, e);
+            }
+        } else if (operationHistory.getOperationDefinition().getName().equals("decommission")) {
+            try {
+                storageNodeOperationsHandler.handleDecommission(resourceOperationHistory);
+            } catch (Exception e) {
+                String msg = "Aborting undeployment due to unexpected error while decommissioning storage node.";
+                log.error(msg, e);
+                storageNodeOperationsHandler.logError(StorageNode.OperationMode.DECOMMISSION, msg, e);
+            }
+        } else if (operationHistory.getOperationDefinition().getName().equals("removeNodeMaintenance")) {
+            try {
+                storageNodeOperationsHandler.handleRemoveNodeMaintenance(resourceOperationHistory);
+            } catch (Exception e) {
+                String msg = "Aborting undeployment due to unexpected error while performing remove node maintenance.";
+                log.error(msg, e);
+                storageNodeOperationsHandler.logError(StorageNode.OperationMode.REMOVE_MAINTENANCE, msg, e);
+            }
+        } else if (operationHistory.getOperationDefinition().getName().equals("unannounce")) {
+            try {
+                storageNodeOperationsHandler.handleUnannounce(resourceOperationHistory);
+            } catch (Exception e) {
+                String msg = "Aborting undeployment due to unexpected error while performing unannouncement.";
+                log.error(msg, e);
+                storageNodeOperationsHandler.logError(StorageNode.OperationMode.UNANNOUNCE, msg, e);
+            }
+        } else if (operationHistory.getOperationDefinition().getName().equals("uninstall")) {
+            try {
+                storageNodeOperationsHandler.handleUninstall(resourceOperationHistory);
+            } catch (Exception e) {
+                String msg = "Aborting undeployment due to unexpected error while uninstalling.";
+                log.error(msg, e);
+                storageNodeOperationsHandler.logError(StorageNode.OperationMode.UNINSTALL, msg, e);
             }
         }
     }
 
-    private void handlePrepareForBootstrap(ResourceOperationHistory resourceOperationHistory) {
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void handleAnnounce(ResourceOperationHistory resourceOperationHistory) {
+        StorageNode storageNode = findStorageNode(resourceOperationHistory.getResource());
+        StorageNode newStorageNode = null;
+        switch (resourceOperationHistory.getStatus()) {
+        case INPROGRESS:
+            // nothing to do here
+            return;
+        case CANCELED:
+            newStorageNode = findStorageNodeByMode(StorageNode.OperationMode.ANNOUNCE);
+            deploymentOperationCanceled(storageNode, resourceOperationHistory, newStorageNode);
+        case FAILURE:
+            newStorageNode = findStorageNodeByMode(StorageNode.OperationMode.ANNOUNCE);
+            deploymentOperationFailed(storageNode, resourceOperationHistory, newStorageNode);
+            return;
+        default:  // SUCCESS
+            storageNode.setMaintenancePending(false);
+            Configuration parameters = resourceOperationHistory.getParameters();
+            PropertyList addresses = parameters.getList("addresses");
+            StorageNode nextNode = takeFromMaintenanceQueue();
+
+            newStorageNode = findStorageNodeByMode(StorageNode.OperationMode.ANNOUNCE);
+            Subject subject = getSubject(resourceOperationHistory);
+
+            if (nextNode == null) {
+                log.info("Successfully announced new storage node to storage cluster");
+                newStorageNode.setOperationMode(StorageNode.OperationMode.BOOTSTRAP);
+                prepareNodeForBootstrap(subject, newStorageNode, addresses.deepCopy(false));
+            } else {
+                announceStorageNode(subject, newStorageNode, nextNode, addresses.deepCopy(false));
+            }
+        }
+    }
+
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void handleUnannounce(ResourceOperationHistory operationHistory) {
+        StorageNode storageNode = findStorageNode(operationHistory.getResource());
+        StorageNode removedStorageNode = null;
+        switch (operationHistory.getStatus()) {
+            case INPROGRESS:
+                // nothing to do here
+                break;
+            case CANCELED:
+                removedStorageNode = findStorageNodeByMode(StorageNode.OperationMode.UNANNOUNCE);
+                undeploymentOperationCanceled(storageNode, operationHistory, removedStorageNode);
+                break;
+            case FAILURE:
+                removedStorageNode = findStorageNodeByMode(StorageNode.OperationMode.UNANNOUNCE);
+                deploymentOperationFailed(storageNode, operationHistory, removedStorageNode);
+                break;
+            default:  // SUCCESS
+                storageNode.setMaintenancePending(false);
+
+                removedStorageNode = findStorageNodeByMode(StorageNode.OperationMode.UNANNOUNCE);
+                StorageNode nextNode = takeFromMaintenanceQueue();
+                Subject subject = getSubject(operationHistory);
+                Configuration params = operationHistory.getParameters();
+                PropertyList addresses = params.getList("addresses");
+
+                if (nextNode == null) {
+                    log.info("Successfully unannounced " + removedStorageNode + " to storage cluster");
+                    uninstall(getSubject(operationHistory), removedStorageNode);
+                } else {
+                    unannounceStorageNode(subject, nextNode, addresses.deepCopy(false));
+                }
+        }
+    }
+
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void handlePrepareForBootstrap(ResourceOperationHistory resourceOperationHistory) {
         StorageNode newStorageNode = findStorageNode(resourceOperationHistory.getResource());
         switch (resourceOperationHistory.getStatus()) {
             case INPROGRESS:
                 // nothing to do here
                 return;
             case CANCELED:
-                log.error("The operation [prepareForBootstrap] was canceled for " + newStorageNode +
-                    ". Deployment of the new storage node cannot proceed.");
-                // TODO update workflow status (the status needs to be accessible in the UI)
+                // TODO Verify whether or not the node has been bootstrapped
+                // If the operation is canceled the plugin will get an InterruptedException.
+                // The actual bootstrapping may very well complete so we need to add in some
+                // checks to find out if the node is up and part of the cluster.
+                deploymentOperationCanceled(newStorageNode, resourceOperationHistory);
                 return;
             case FAILURE:
-                log.error("The operation [preparedForBootstrap] failed for " + newStorageNode + ". The reported " +
-                    "failure is: " + resourceOperationHistory.getErrorMessage());
-                log.error("Deployment of the new storage node cannot proceed.");
-                // TODO update workflow status (the status needs to be accessible in the UI)
+                deploymentOperationFailed(newStorageNode, resourceOperationHistory);
                 return;
             default:  // SUCCESS
                 // Nothing to do because we wait for the C* driver to notify us that the
@@ -171,76 +424,215 @@ public class StorageNodeOperationsHandlerBean implements StorageNodeOperationsHa
         }
     }
 
-    private void handleUpdateKnownNodes(ResourceOperationHistory resourceOperationHistory) {
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void handleAddNodeMaintenance(ResourceOperationHistory resourceOperationHistory) {
         StorageNode storageNode = findStorageNode(resourceOperationHistory.getResource());
+        StorageNode newStorageNode = null;
         switch (resourceOperationHistory.getStatus()) {
             case INPROGRESS:
                 // nothing to do here
                 return;
             case CANCELED:
-                log.error("The operation [updateKnownNodes] was canceled for " + storageNode +
-                    ". Deployment of the new storage node cannot proceed.");
-                // TODO update workflow status (the status needs to be accessible in the UI)
+                newStorageNode = findStorageNodeByMode(StorageNode.OperationMode.ADD_MAINTENANCE);
+                deploymentOperationCanceled(storageNode, resourceOperationHistory, newStorageNode);
                 return;
             case FAILURE:
-                log.error("The operation [updateKnownNodes] failed for " + storageNode + ". The reported " +
-                    "failure is: " + resourceOperationHistory.getErrorMessage());
-                log.error("Deployment of the new storage node cannot proceed.");
-                // TODO update workflow status (the status needs to be accessible in the UI)
+                newStorageNode = findStorageNodeByMode(StorageNode.OperationMode.ADD_MAINTENANCE);
+                deploymentOperationFailed(storageNode, resourceOperationHistory, newStorageNode);
                 return;
             default:  // SUCCESS
-                if (log.isInfoEnabled()) {
-                    log.info("Finished announcing cluster nodes to " + storageNode);
-                }
-                storageNode.setOperationMode(StorageNode.OperationMode.ADD_NODE_MAINTENANCE);
-                Configuration parameters = resourceOperationHistory.getParameters();
-                PropertyList addresses = parameters.getList("addresses");
-                StorageNode nextNode = takeFromQueue(storageNode, StorageNode.OperationMode.ANNOUNCE);
+                log.info("Finished running add node maintenance for " + storageNode);
+                storageNode.setMaintenancePending(false);
+                StorageNode nextNode = takeFromMaintenanceQueue();
 
                 if (nextNode == null) {
-                    log.info("Successfully announced new storage node to cluster");
-                    StorageNode installedNode = findStorageNodeToPrepareForBootstrap(addresses);
-                    // Pass a copy of addresses to avoid a TransientObjectException
-                    prepareNodeForBootstrap(installedNode, addresses.deepCopy(false));
-                } else {
-                    announceNewStorageNode(storageNode, nextNode, addresses.deepCopy(false));
-                }
-        }
-    }
-
-    private void handleAddNodeMaintenance(ResourceOperationHistory resourceOperationHistory) {
-        StorageNode storageNode = findStorageNode(resourceOperationHistory.getResource());
-        switch (resourceOperationHistory.getStatus()) {
-            case INPROGRESS:
-                // nothing to do here
-                return;
-            case CANCELED:
-                log.error("The operation [addNodeMaintenance] was canceled for " + storageNode + ". This operation " +
-                    "needs to be run on each storage node when a new node is added to the cluster.");
-                    // TODO update workflow status (the status needs to be accessible in the UI)
-                return;
-            case FAILURE:
-                log.error("The operation [addNodeMaintenance] failed for " + storageNode + ". This operation " +
-                    "needs to be run on each storage node when a new node is added to the cluster. The reported " +
-                    "failure is: " + resourceOperationHistory.getErrorMessage());
-                // TODO update workflow status (the status needs to be accessible in the UI)
-                return;
-            default:  // SUCCESS
-                if (log.isInfoEnabled()) {
-                    log.info("Finnished cluster maintenance for " + storageNode + " for addition of new node");
-                }
-                storageNode.setOperationMode(StorageNode.OperationMode.NORMAL);
-                StorageNode nextNode = takeFromQueue(storageNode, StorageNode.OperationMode.ADD_NODE_MAINTENANCE);
-
-                if (nextNode == null) {
-                    log.info("Finished running cluster maintenance for addition of new node");
+                    log.info("Finished running add node maintenance on all cluster nodes");
+                    // TODO replace this with an UPDATE statement
+                    newStorageNode = findStorageNodeByMode(StorageNode.OperationMode.ADD_MAINTENANCE);
+                    newStorageNode.setOperationMode(StorageNode.OperationMode.NORMAL);
                 } else {
                     Configuration parameters = resourceOperationHistory.getParameters();
                     boolean runRepair = parameters.getSimple(RUN_REPAIR_PROPERTY).getBooleanValue();
                     PropertyList seedsList = parameters.getList(SEEDS_LIST).deepCopy(false);
-                    performAddNodeMaintenance(nextNode, runRepair, seedsList);
+                    Subject subject = getSubject(resourceOperationHistory);
+                    performAddNodeMaintenance(subject, nextNode, runRepair, seedsList);
                 }
         }
+    }
+
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void handleRemoveNodeMaintenance(ResourceOperationHistory operationHistory) {
+        StorageNode storageNode = findStorageNode(operationHistory.getResource());
+        StorageNode removedStorageNode = null;
+        switch (operationHistory.getStatus()) {
+            case INPROGRESS:
+                // nothing to do here
+                break;
+            case CANCELED:
+                removedStorageNode = findStorageNodeByMode(StorageNode.OperationMode.REMOVE_MAINTENANCE);
+                undeploymentOperationCanceled(storageNode, operationHistory, removedStorageNode);
+                break;
+            case FAILURE:
+                removedStorageNode = findStorageNodeByMode(StorageNode.OperationMode.REMOVE_MAINTENANCE);
+                undeploymentOperationFailed(storageNode, operationHistory, removedStorageNode);
+                break;
+            default:  // SUCCESS
+                log.info("Finished remove node maintenance for " + storageNode);
+                storageNode.setMaintenancePending(false);
+                StorageNode nextNode = takeFromMaintenanceQueue();
+
+                if (nextNode == null) {
+                    log.info("Finished running remove node maintenance on all cluster nodes");
+                    // TODO replace this with an UPDATE statement
+                    removedStorageNode = findStorageNodeByMode(StorageNode.OperationMode.REMOVE_MAINTENANCE);
+                    unannounceStorageNode(getSubject(operationHistory), removedStorageNode);
+                } else {
+                    Configuration parameters = operationHistory.getParameters();
+                    boolean runRepair = parameters.getSimple(RUN_REPAIR_PROPERTY).getBooleanValue();
+                    PropertyList seedsList = parameters.getList(SEEDS_LIST).deepCopy(false);
+                    Subject subject = getSubject(operationHistory);
+                    performRemoveNodeMaintenance(subject, nextNode, runRepair, seedsList);
+                }
+        }
+    }
+
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void handleDecommission(ResourceOperationHistory operationHistory) {
+        StorageNode storageNode = findStorageNode(operationHistory.getResource());
+        switch (operationHistory.getStatus()) {
+            case INPROGRESS:
+                // nothing do to here
+                break;
+            case CANCELED:
+                undeploymentOperationCanceled(storageNode, operationHistory);
+                break;
+            case FAILURE:
+                undeploymentOperationFailed(storageNode, operationHistory);
+                break;
+            default:  // SUCCESS
+                log.info("Successfully decommissioned " + storageNode);
+        }
+    }
+
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void handleUninstall(ResourceOperationHistory operationHistory) {
+        StorageNode storageNode = findStorageNode(operationHistory.getResource());
+        switch (operationHistory.getStatus()) {
+            case INPROGRESS:
+                // nothing to do here
+                break;
+            case CANCELED:
+                undeploymentOperationCanceled(storageNode, operationHistory);
+                break;
+            case FAILURE:
+                undeploymentOperationFailed(storageNode, operationHistory);
+                break;
+            default:  // SUCCESS
+                log.info("Successfully uninstalled " + storageNode + " from disk");
+                finishUninstall(getSubject(operationHistory), storageNode);
+        }
+    }
+
+    private void finishUninstall(Subject subject, StorageNode storageNode) {
+        if (storageNode.getResource() != null) {
+            log.info("Removing storage node resource " + storageNode.getResource() + " from inventory");
+            storageNodeOperationsHandler.detachFromResource(storageNode);
+            resourceManager.uninventoryResource(subject, storageNode.getResource().getId());
+        }
+        log.info("Removing storage node entity " + storageNode + " from database");
+        entityManager.remove(storageNode);
+    }
+
+    private Subject getSubject(ResourceOperationHistory resourceOperationHistory) {
+        Subject subject = subjectManager.getSubjectByName(resourceOperationHistory.getSubjectName());
+        return SessionManager.getInstance().put(subject);
+    }
+
+    private void deploymentOperationCanceled(StorageNode storageNode, ResourceOperationHistory operationHistory,
+        StorageNode newStorageNode) {
+        operationCanceled(storageNode, operationHistory, newStorageNode, "Deployment");
+    }
+
+    private void undeploymentOperationCanceled(StorageNode storageNode, ResourceOperationHistory operationHistory,
+        StorageNode removedStorageNode) {
+        operationCanceled(storageNode, operationHistory, removedStorageNode, "Undeployment");
+    }
+
+    private void operationCanceled(StorageNode storageNode, ResourceOperationHistory operationHistory,
+        StorageNode movingNode, String opType) {
+        log.error(opType + " has been aborted due to canceled operation [" +
+            operationHistory.getOperationDefinition().getDisplayName() + " on " + storageNode.getResource() +
+            ": " + operationHistory.getErrorMessage());
+
+        movingNode.setErrorMessage(opType + " has been aborted due to canceled resource operation on " +
+            storageNode.getAddress());
+        storageNode.setErrorMessage(opType + " of " + movingNode.getAddress() + " has been aborted due " +
+            "to cancellation of resource operation [" + operationHistory.getOperationDefinition().getDisplayName() +
+            "].");
+        storageNode.setFailedOperation(operationHistory);
+    }
+
+    private void deploymentOperationCanceled(StorageNode newStorageNode, ResourceOperationHistory operationHistory) {
+        operationCanceled(newStorageNode, operationHistory, "Deployment");
+    }
+
+    private void undeploymentOperationCanceled(StorageNode storageNode, ResourceOperationHistory operationHistory) {
+        operationCanceled(storageNode, operationHistory, "Undeployment");
+    }
+
+    private void operationCanceled(StorageNode storageNode, ResourceOperationHistory operationHistory, String opType) {
+        log.error(opType + " has been aborted due to canceled operation [" +
+            operationHistory.getOperationDefinition().getDisplayName() + " on " + storageNode.getResource() +
+            ": " + operationHistory.getErrorMessage());
+
+        storageNode.setErrorMessage(opType + " has been aborted due to canceled resource operation [" +
+            operationHistory.getOperationDefinition().getDisplayName() + "].");
+        storageNode.setFailedOperation(operationHistory);
+    }
+
+    private void deploymentOperationFailed(StorageNode storageNode, ResourceOperationHistory operationHistory,
+        StorageNode newStorageNode) {
+        operationFailed(storageNode, operationHistory, newStorageNode, "Deployment");
+    }
+
+    private void undeploymentOperationFailed(StorageNode storageNode, ResourceOperationHistory operationHistory,
+        StorageNode removedNode) {
+        operationFailed(storageNode, operationHistory, removedNode, "Undeployment");
+    }
+
+    private void deploymentOperationFailed(StorageNode storageNode, ResourceOperationHistory operationHistory) {
+        operationFailed(storageNode, operationHistory, "Deployment");
+    }
+
+    private void undeploymentOperationFailed(StorageNode storageNode, ResourceOperationHistory operationHistory) {
+        operationFailed(storageNode, operationHistory, "Undeployment");
+    }
+
+    private void operationFailed(StorageNode storageNode, ResourceOperationHistory operationHistory, String opType) {
+        log.error(opType + " has been aborted due to failed operation [" +
+            operationHistory.getOperationDefinition().getDisplayName() + "] on " + storageNode.getResource() +
+            ": " + operationHistory.getErrorMessage());
+
+        storageNode.setErrorMessage(opType + " has been aborted due to failed resource operation [" +
+            operationHistory.getOperationDefinition().getDisplayName() + "].");
+        storageNode.setFailedOperation(operationHistory);
+    }
+
+    private void operationFailed(StorageNode storageNode, ResourceOperationHistory operationHistory,
+        StorageNode movingNode, String opType) {
+            log.error(opType + " has been aborted due to failed operation [" +
+                operationHistory.getOperationDefinition().getDisplayName() + "] on " + storageNode.getResource() +
+                ": " + operationHistory.getErrorMessage());
+
+            movingNode.setErrorMessage(opType + " has been aborted due to failed resource operation on " +
+                storageNode.getAddress());
+            storageNode.setErrorMessage(opType + " of " + movingNode.getAddress() + " has been aborted due " +
+                "to failed resource operation [" + operationHistory.getOperationDefinition().getDisplayName() + "].");
+            storageNode.setFailedOperation(operationHistory);
     }
 
     private StorageNode findStorageNode(Resource resource) {
@@ -252,67 +644,50 @@ public class StorageNodeOperationsHandlerBean implements StorageNodeOperationsHa
         return null;
     }
 
-    private StorageNode findStorageNodeToPrepareForBootstrap(PropertyList addressList) {
-        // It is possible that we could have more that one INSTALLED node. We want to make
-        // sure we grab the one that was just announced to the cluster.
-        Set<String> addresses = toSet(addressList);
-        List<StorageNode> installedNodes = entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE,
-            StorageNode.class).setParameter("operationMode", StorageNode.OperationMode.INSTALLED).getResultList();
-
-        for (StorageNode installedNode : installedNodes) {
-            if (addresses.contains(installedNode.getAddress())) {
-                return installedNode;
-            }
-        }
-        // TODO What should we do in the very unlikely event that we do not find the IP address?
-        throw new IllegalStateException("Failed to find storage node to be bootstrapped.");
+    @Override
+    public void bootstrapStorageNode(Subject subject, StorageNode storageNode) {
+        List<StorageNode> clusterNodes = entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE,
+            StorageNode.class).setParameter("operationMode", StorageNode.OperationMode.NORMAL).getResultList();
+        clusterNodes.add(storageNode);
+        prepareNodeForBootstrap(subject, storageNode, createPropertyListOfAddresses("addresses", clusterNodes));
     }
 
-    private Set<String> toSet(PropertyList propertyList) {
-        Set<String> set = new HashSet<String>();
-        for (Property property : propertyList.getList()) {
-            PropertySimple simple = (PropertySimple) property;
-            set.add(simple.getStringValue());
-        }
-        return set;
-    }
-
-    private void prepareNodeForBootstrap(StorageNode storageNode, PropertyList addresses) {
+    private void prepareNodeForBootstrap(Subject subject, StorageNode storageNode, PropertyList addresses) {
         if (log.isInfoEnabled()) {
             log.info("Preparing to bootstrap " + storageNode + " into cluster...");
         }
-
-        ResourceOperationSchedule schedule = new ResourceOperationSchedule();
-        schedule.setResource(storageNode.getResource());
-        schedule.setJobTrigger(JobTrigger.createNowTrigger());
-        schedule.setSubject(subjectManager.getOverlord());
-        schedule.setOperationName("prepareForBootstrap");
-
-        StorageClusterSettings clusterSettings = storageClusterSettingsManager.getClusterSettings(
-            subjectManager.getOverlord());
+        StorageClusterSettings clusterSettings = storageClusterSettingsManager.getClusterSettings(subject);
         Configuration parameters = new Configuration();
         parameters.put(new PropertySimple("cqlPort", clusterSettings.getCqlPort()));
         parameters.put(new PropertySimple("gossipPort", clusterSettings.getGossipPort()));
         parameters.put(addresses);
 
-        schedule.setParameters(parameters);
-
-        operationManager.scheduleResourceOperation(subjectManager.getOverlord(), schedule);
+        scheduleOperation(subject, storageNode, parameters, "prepareForBootstrap");
     }
 
-    private StorageNode takeFromQueue(StorageNode lastTaken, StorageNode.OperationMode queue) {
-        List<StorageNode> nodes = entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE_EXCLUDING,
-            StorageNode.class).setParameter("operationMode", queue).setParameter("storageNode", lastTaken)
+    private StorageNode takeFromMaintenanceQueue() {
+        List<StorageNode> storageNodes = entityManager.createQuery("SELECT s FROM StorageNode s WHERE " +
+            "s.operationMode = :operationMode AND s.maintenancePending = :maintenancePending", StorageNode.class)
+            .setParameter("operationMode", StorageNode.OperationMode.NORMAL).setParameter("maintenancePending", true)
             .getResultList();
 
-        if (nodes.isEmpty()) {
+        if (storageNodes.isEmpty()) {
             return null;
         }
-        return nodes.get(0);
+        return storageNodes.get(0);
     }
 
-    private boolean isStorageNodeOperation(OperationDefinition operationDefinition) {
-        ResourceType resourceType = operationDefinition.getResourceType();
+    private StorageNode findStorageNodeByMode(StorageNode.OperationMode operationMode) {
+        return entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE, StorageNode.class)
+                .setParameter("operationMode", operationMode).getSingleResult();
+    }
+
+    private boolean isStorageNodeOperation(ResourceOperationHistory operationHistory) {
+        if (operationHistory == null) {
+            return false;
+        }
+
+        ResourceType resourceType = operationHistory.getOperationDefinition().getResourceType();
         return resourceType.getName().equals(STORAGE_NODE_TYPE_NAME) &&
             resourceType.getPlugin().equals(STORAGE_NODE_PLUGIN_NAME);
     }
@@ -401,6 +776,19 @@ public class StorageNodeOperationsHandlerBean implements StorageNodeOperationsHa
                 + "in rhq-server.properties.");
         }
         return value;
+    }
+
+    private void scheduleOperation(Subject subject, StorageNode storageNode, Configuration parameters,
+        String operation) {
+        ResourceOperationSchedule schedule = new ResourceOperationSchedule();
+        schedule.setResource(storageNode.getResource());
+        schedule.setJobTrigger(JobTrigger.createNowTrigger());
+        schedule.setSubject(subject);
+        schedule.setOperationName(operation);
+        schedule.setParameters(parameters);
+
+        operationManager.scheduleResourceOperation(subject, schedule);
+
     }
 
     private PropertyList createPropertyListOfAddresses(String propertyName, List<StorageNode> nodes) {

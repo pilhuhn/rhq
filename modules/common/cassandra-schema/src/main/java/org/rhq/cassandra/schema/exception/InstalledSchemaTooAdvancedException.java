@@ -33,6 +33,7 @@ public class InstalledSchemaTooAdvancedException extends Exception {
 
     public InstalledSchemaTooAdvancedException() {
         super(
-            "Storage schema is too advanced for the current installation. Schema revisions have been applied beyond the capability of the installation.");
+            "Storage schema is too advanced for the current installation. Schema revisions have been applied beyond the capability of the installation. "
+                + "Please install a newer version of the server that is compatibile with the storage schema version.");
     }
 }

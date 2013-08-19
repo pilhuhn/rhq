@@ -53,6 +53,7 @@ import org.rhq.core.domain.auth.Subject;
 import org.rhq.core.domain.authz.Permission;
 import org.rhq.core.domain.cloud.StorageNode;
 import org.rhq.core.domain.cloud.StorageNode.OperationMode;
+import org.rhq.core.domain.cloud.StorageClusterSettings;
 import org.rhq.core.domain.cloud.StorageNodeConfigurationComposite;
 import org.rhq.core.domain.cloud.StorageNodeLoadComposite;
 import org.rhq.core.domain.common.JobTrigger;
@@ -84,7 +85,6 @@ import org.rhq.enterprise.server.resource.ResourceManagerLocal;
 import org.rhq.enterprise.server.resource.ResourceTypeManagerLocal;
 import org.rhq.enterprise.server.rest.reporting.MeasurementConverter;
 import org.rhq.enterprise.server.scheduler.SchedulerLocal;
-import org.rhq.enterprise.server.storage.StorageClusterSettings;
 import org.rhq.enterprise.server.storage.StorageClusterSettingsManagerLocal;
 import org.rhq.enterprise.server.storage.StorageNodeOperationsHandlerLocal;
 import org.rhq.enterprise.server.util.CriteriaQueryGenerator;
@@ -177,21 +177,12 @@ public class StorageNodeManagerBean implements StorageNodeManagerLocal, StorageN
                 storageNode.setOperationMode(OperationMode.NORMAL);
                 initClusterSettingsIfNecessary(pluginConfig);
             } else {
-                storageNode = new StorageNode();
-                storageNode.setAddress(address);
-                storageNode.setCqlPort(Integer.parseInt(pluginConfig.getSimpleValue(RHQ_STORAGE_CQL_PORT_PROPERTY)));
-                storageNode.setJmxPort(Integer.parseInt(pluginConfig.getSimpleValue(RHQ_STORAGE_JMX_PORT_PROPERTY)));
-                storageNode.setResource(resource);
-                storageNode.setOperationMode(OperationMode.INSTALLED);
-
-                entityManager.persist(storageNode);
+                storageNode = createStorageNode(resource);
 
                 if (log.isInfoEnabled()) {
-                    log.info(storageNode + " is a new storage node and not part of the storage node cluster.");
-                    log.info("Scheduling maintenance operations to bring " + storageNode + " into the cluster...");
+                    log.info("Scheduling cluster maintenance to deploy " + storageNode + " into the storage cluster...");
                 }
-
-                announceNewNode(storageNode);
+                deployStorageNode(subjectManager.getOverlord(), storageNode);
             }
         } catch (UnknownHostException e) {
             throw new RuntimeException("Could not resolve address [" + address + "]. The resource " + resource +
@@ -224,17 +215,91 @@ public class StorageNodeManagerBean implements StorageNodeManagerLocal, StorageN
         storageClusterSettingsManager.setClusterSettings(subjectManager.getOverlord(), clusterSettings);
     }
 
-    private void announceNewNode(StorageNode newStorageNode) {
-        if (log.isInfoEnabled()) {
-            log.info("Announcing " + newStorageNode + " to storage node cluster.");
-        }
+    @Override
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public StorageNode createStorageNode(Resource resource) {
+        Configuration pluginConfig = resource.getPluginConfiguration();
 
-        List<StorageNode> clusteredNodes = getClusteredStorageNodes();
-        for (StorageNode node : clusteredNodes) {
-            node.setOperationMode(OperationMode.ANNOUNCE);
+        StorageNode storageNode = new StorageNode();
+        storageNode.setAddress(pluginConfig.getSimpleValue(RHQ_STORAGE_ADDRESS_PROPERTY));
+        storageNode.setCqlPort(Integer.parseInt(pluginConfig.getSimpleValue(RHQ_STORAGE_CQL_PORT_PROPERTY)));
+        storageNode.setJmxPort(Integer.parseInt(pluginConfig.getSimpleValue(RHQ_STORAGE_JMX_PORT_PROPERTY)));
+        storageNode.setResource(resource);
+        storageNode.setOperationMode(OperationMode.INSTALLED);
+
+        entityManager.persist(storageNode);
+
+        return storageNode;
+    }
+
+    @Override
+    public void deployStorageNode(Subject subject, StorageNode storageNode) {
+        storageNode = entityManager.find(StorageNode.class, storageNode.getId());
+
+        switch (storageNode.getOperationMode()) {
+            case INSTALLED:
+            case ANNOUNCE:
+                reset();
+                storageNodeOperationsHandler.announceStorageNode(subject, storageNode);
+                break;
+            case BOOTSTRAP:
+                reset();
+                storageNodeOperationsHandler.bootstrapStorageNode(subject, storageNode);
+                break;
+            case ADD_MAINTENANCE:
+                reset();
+                storageNodeOperationsHandler.performAddNodeMaintenance(subject, storageNode);
+            default:
+                // TODO what do we do with/about maintenance mode?
+
+                // We do not want to deploying a node that is in the process of being
+                // undeployed. It is too hard to make sure we are in an inconsistent state.
+                // Instead finishe the undeployment and redeploy the storage node.
+                throw new RuntimeException("Cannot deploy " + storageNode);
         }
-        PropertyList addresses = createPropertyListOfAddresses("addresses", combine(clusteredNodes, newStorageNode));
-        storageNodeOperationsHandler.announceNewStorageNode(newStorageNode, clusteredNodes.get(0), addresses);
+    }
+
+    @Override
+    public void undeployStorageNode(Subject subject, StorageNode storageNode) {
+        storageNode = entityManager.find(StorageNode.class, storageNode.getId());
+        switch (storageNode.getOperationMode()) {
+            case INSTALLED:
+                reset();
+                storageNodeOperationsHandler.uninstall(subject, storageNode);
+                break;
+            case ANNOUNCE:
+            case BOOTSTRAP:
+                reset();
+                storageNodeOperationsHandler.unannounceStorageNode(subject, storageNode);
+                break;
+            case ADD_MAINTENANCE:
+            case NORMAL:
+            case DECOMMISSION:
+                reset();
+                storageNodeOperationsHandler.decommissionStorageNode(subject, storageNode);
+                break;
+            case REMOVE_MAINTENANCE:
+                reset();
+                storageNodeOperationsHandler.performRemoveNodeMaintenance(subject, storageNode);
+            case UNANNOUNCE:
+                reset();
+                storageNodeOperationsHandler.unannounceStorageNode(subject, storageNode);
+                break;
+            case UNINSTALL:
+                reset();
+                storageNodeOperationsHandler.uninstall(subject, storageNode);
+                break;
+            default:
+                // TODO what do we do with/about maintenance mode
+                throw new RuntimeException("Cannot undeploy " + storageNode);
+        }
+    }
+
+    private void reset() {
+        for (StorageNode storageNode : getStorageNodes()) {
+            storageNode.setErrorMessage(null);
+            storageNode.setFailedOperation(null);
+        }
     }
 
     private List<StorageNode> combine(List<StorageNode> storageNodes, StorageNode storageNode) {
@@ -251,12 +316,6 @@ public class StorageNodeManagerBean implements StorageNodeManagerLocal, StorageN
             list.add(new PropertySimple("address", storageNode.getAddress()));
         }
         return list;
-    }
-
-    @Override
-    public boolean isAddNodeMaintenanceInProgress() {
-        return !entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE)
-            .setParameter("operationMode", OperationMode.ADD_NODE_MAINTENANCE).getResultList().isEmpty();
     }
 
     @Override
@@ -410,17 +469,17 @@ public class StorageNodeManagerBean implements StorageNodeManagerLocal, StorageN
         long endTime = System.currentTimeMillis();
         long beginTime = endTime - (8 * 60 * 60 * 1000);
         for (StorageNode node : nodes) {
-            StorageNodeLoadComposite composite = getLoad(subjectManager.getOverlord(), node, beginTime, endTime);
-            int unackAlerts = findNotAcknowledgedStorageNodeAlerts(subjectManager.getOverlord(), node).size();
-            composite.setUnackAlerts(unackAlerts);
-            result.add(composite);
+            if (node.getOperationMode() != OperationMode.INSTALLED) {
+                StorageNodeLoadComposite composite = getLoad(subjectManager.getOverlord(), node, beginTime, endTime);
+                int unackAlerts = findNotAcknowledgedStorageNodeAlerts(subjectManager.getOverlord(), node).size();
+                composite.setUnackAlerts(unackAlerts);
+                result.add(composite);
+            } else { // newly installed node
+                result.add(new StorageNodeLoadComposite(node, beginTime, endTime));
+            }
+            
         }
         return result;
-    }
-
-    private List<StorageNode> getClusteredStorageNodes() {
-        return entityManager.createNamedQuery(StorageNode.QUERY_FIND_ALL_BY_MODE, StorageNode.class)
-            .setParameter("operationMode", OperationMode.NORMAL).getResultList();
     }
 
     @Override
@@ -575,7 +634,7 @@ public class StorageNodeManagerBean implements StorageNodeManagerLocal, StorageN
 
     @Override
     public Integer[] findResourcesWithAlertDefinitions(StorageNode storageNode) {
-        List<StorageNode> initialStorageNodes = null;
+        List<StorageNode> initialStorageNodes = getStorageNodes();
         if (storageNode == null) {
             initialStorageNodes = getStorageNodes();
         } else {

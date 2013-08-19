@@ -40,9 +40,15 @@ public enum StorageNodeDatasourceField {
 
     FIELD_OPERATION_MODE("operationMode", CoreGUI.getMessages().view_adminTopology_server_mode()),
     
+    FIELD_STATUS("status", "Status"),
+    
     FIELD_MEMORY("memory", "Memory"),
     
     FIELD_DISK("disk", "Disk"),
+    
+    FIELD_ERROR_MESSAGE("errorMessage", "Error"),
+    
+    FIELD_FAILED_OPERATION("failedOperation", "Failed Operation"),
 
     FIELD_CTIME("ctime", CoreGUI.getMessages().view_adminTopology_serverDetail_installationDate()),
 
