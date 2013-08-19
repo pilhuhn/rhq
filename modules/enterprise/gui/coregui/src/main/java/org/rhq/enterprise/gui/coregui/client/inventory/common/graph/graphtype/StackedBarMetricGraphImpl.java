@@ -384,7 +384,57 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
                         .attr("data-rhq-value", function (d) {
                             return d.y;
                         })
-                        .attr("opacity", 0.9);
+                        .attr("opacity", 0.9)
+                        .on("mouseover",function (d) {
+
+                            var timeFormatter = $wnd.d3.time.format(chartContext.chartHoverTimeFormat),
+                                    dateFormatter = $wnd.d3.time.format(chartContext.chartHoverDateFormat),
+                                    startDate = new Date(+d.x),
+                              xPosition = parseFloat($wnd.d3.select(this).attr("x")),
+                                  yPosition = parseFloat($wnd.d3.select(this).attr("y")),
+                                    metricGraphTooltipDiv =  $wnd.d3.select("#metricGraphTooltip")
+                                            .style("left", + xPosition + "px")
+                                            .style("top",  + yPosition +  "px");
+
+                            metricGraphTooltipDiv.select("#metricGraphTooltipTimeLabel")
+                                    .text(chartContext.timeLabel);
+                            metricGraphTooltipDiv.select("#metricGraphTooltipTimeValue")
+                                    .text(timeFormatter(startDate));
+
+                            metricGraphTooltipDiv.select("#metricGraphTooltipDateLabel")
+                                    .text(chartContext.dateLabel);
+                            metricGraphTooltipDiv.select("#metricGraphTooltipDateValue")
+                                    .text(dateFormatter(startDate));
+
+                            metricGraphTooltipDiv.select("#metricGraphTooltipDurationLabel")
+                                    .text(chartContext.hoverBarLabel);
+                            metricGraphTooltipDiv.select("#metricGraphTooltipDurationValue")
+                                    .text(d.barDuration);
+
+                            metricGraphTooltipDiv.select("#metricGraphTooltipMaxLabel")
+                                    .text(chartContext.peakChartTitle);
+                            metricGraphTooltipDiv.select("#metricGraphTooltipMaxValue")
+                                    .text(d.high.toFixed(1));
+
+                            metricGraphTooltipDiv.select("#metricGraphTooltipAvgLabel")
+                                    .text(chartContext.avgChartTitle);
+                            metricGraphTooltipDiv.select("#metricGraphTooltipAvgValue")
+                                    .text(d.y.toFixed(1));
+
+
+                            metricGraphTooltipDiv.select("#metricGraphTooltipMinLabel")
+                                    .text(chartContext.minChartTitle);
+                            metricGraphTooltipDiv.select("#metricGraphTooltipMinValue")
+                                    .text(d.low.toFixed(1));
+
+
+                            //Show the tooltip
+                            $wnd.d3.select("#metricGraphTooltip").classed("hidden", false);
+                        }).on("mouseout", function () {
+                            //Hide the tooltip
+                            $wnd.d3.select("#metricGraphTooltip").classed("hidden", true);
+                        });
+
 
 
                 // lower portion representing avg to low
@@ -648,20 +698,20 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
 
             }
 
-            function createHovers(chartContext) {
-                $wnd.jQuery('svg rect.leaderBar, svg rect.high, svg rect.low, svg rect.singleValue').tipsy({
-                    gravity: 'w',
-                    html: true,
-                    trigger: 'hover',
-                    title: function () {
-                        var d = this.__data__;
-                        return formatHovers(chartContext, d);
-                    },
-                    show: function (e, el) {
-                        el.css({ 'z-index': '990000'})
-                    }
-                });
-            }
+//            function createHovers(chartContext) {
+//                $wnd.jQuery('svg rect.leaderBar, svg rect.high, svg rect.low, svg rect.singleValue').tipsy({
+//                    gravity: 'w',
+//                    html: true,
+//                    trigger: 'hover',
+//                    title: function () {
+//                        var d = this.__data__;
+//                        return formatHovers(chartContext, d);
+//                    },
+//                    show: function (e, el) {
+//                        el.css({ 'z-index': '990000'})
+//                    }
+//                });
+//            }
 
             return {
                 // Public API
@@ -685,7 +735,7 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
                             console.log("OOB Data Exists!");
                             createOOBLines();
                         }
-                        createHovers(chartContext);
+                        //createHovers(chartContext);
                     }
                 }
             }; // end public closure

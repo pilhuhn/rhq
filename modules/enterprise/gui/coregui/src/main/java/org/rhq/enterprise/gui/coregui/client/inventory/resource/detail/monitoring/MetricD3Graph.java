@@ -167,7 +167,59 @@ public class MetricD3Graph<T extends AbstractD3GraphListView> extends EnhancedVL
                         + "\" ><svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" style=\"height:"
                         + height + "px;\">");
         divAndSvgDefs.append(getSvgDefs());
-        divAndSvgDefs.append("</svg></div>");
+        divAndSvgDefs.append("</svg>");
+        divAndSvgDefs.append(createTooltip());
+        divAndSvgDefs.append("</div>");
+
+        return divAndSvgDefs.toString();
+    }
+
+    private static String createTooltip() {
+        StringBuilder divAndSvgDefs = new StringBuilder();
+
+        divAndSvgDefs.append("<div id=\"metricGraphTooltip\" class=\"hidden\" >");
+        divAndSvgDefs.append("<div>");
+
+        divAndSvgDefs.append("<div>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipTimeLabel\" ></span>");
+        divAndSvgDefs.append("<span>: </span>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipTimeValue\" ></span>");
+        divAndSvgDefs.append("</div>");
+
+        divAndSvgDefs.append("<div>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipDateLabel\" ></span>");
+        divAndSvgDefs.append("<span>: </span>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipDateValue\" ></span>");
+        divAndSvgDefs.append("</div>");
+
+        divAndSvgDefs.append("<div>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipDurationLabel\" ></span>");
+        divAndSvgDefs.append("<span>: </span>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipDurationValue\" ></span>");
+        divAndSvgDefs.append("<div/>");
+        divAndSvgDefs.append("<hr></hr>");
+
+        divAndSvgDefs.append("<div >");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipMaxLabel\" ></span>");
+        divAndSvgDefs.append("<span> : </span>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipMaxValue\" ></span>");
+        divAndSvgDefs.append("<div/>");
+
+        divAndSvgDefs.append("<div>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipAvgLabel\" ></span>");
+        divAndSvgDefs.append("<span> : </span>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipAvgValue\" ></span>");
+        divAndSvgDefs.append("<div/>");
+
+        divAndSvgDefs.append("<div>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipMinLabel\" ></span>");
+        divAndSvgDefs.append("<span> : </span>");
+        divAndSvgDefs.append("<span id=\"metricGraphTooltipMinValue\" ></span>");
+        divAndSvgDefs.append("<div/>");
+
+
+        divAndSvgDefs.append("</div>");
+        divAndSvgDefs.append("</div>");   // end metricGraphTooltipDiv
         return divAndSvgDefs.toString();
     }
 
