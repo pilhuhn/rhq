@@ -58,6 +58,8 @@ public class UserPreferences {
         preferencesThatShouldNeverCauseRefresh.add(UserPreferenceNames.RECENT_RESOURCES);
         // this is auto-set while navigating around and does not affect the current page        
         preferencesThatShouldNeverCauseRefresh.add(UserPreferenceNames.RECENT_RESOURCE_GROUPS);
+        // for graphs changing the date will not autoupdate when we already handle it
+        preferencesThatShouldNeverCauseRefresh.add(UserPreferenceNames.MONITOR_VISIBILITY_METRIC_RANGE);
         // this update is already applied to current portlets by the dashboard impl
         preferencesThatShouldNeverCauseRefresh.add(UserPreferenceNames.PAGE_REFRESH_PERIOD);
     }

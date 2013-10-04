@@ -359,8 +359,7 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
 
 
                 //Show the tooltip
-                $wnd.d3.select("#metricGraphTooltip").classed("hidden", false);
-
+                $wnd.jQuery('#metricGraphTooltip').show();
                 setTimeout(function(){$wnd.jQuery('#metricGraphTooltip').hide();},5000);
 
             }
@@ -387,7 +386,7 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
                         .text(chartContext.noDataLabel);
 
                 //Show the tooltip
-                $wnd.d3.select("#noDataTooltip").classed("hidden", false);
+                $wnd.jQuery('#noDataTooltip').show();
                 setTimeout(function(){$wnd.jQuery('#noDataTooltip').hide();},5000);
 
             }
@@ -445,12 +444,13 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
                         }
                     }).on("mouseout", function (d) {
                         if (d.down || d.unknown || d.nodata) {
-                            $wnd.d3.select("#noDataTooltip").classed("hidden", true);
+                            //$wnd.d3.select("#noDataTooltip").classed("hidden", true);
+                            $wnd.jQuery('#noDataTooltip').hide();
                         }else {
                             if(+d.high === +d.low){
-                                $wnd.d3.select("#singleValueTooltip").classed("hidden", true);
+                                $wnd.jQuery('#singleValueTooltip').hide();
                             } else {
-                                $wnd.d3.select("#metricGraphTooltip").classed("hidden", true);
+                                $wnd.jQuery('#metricGraphTooltip').hide();
                             }
                         }
                     });
@@ -486,9 +486,9 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
                             showFullMetricBarHover(d);
                         }).on("mouseout", function (d) {
                             if (d.down || d.unknown || d.nodata) {
-                                $wnd.d3.select("#noDataTooltip").classed("hidden", true);
+                                $wnd.jQuery('#noDataTooltip').hide();
                             }else {
-                                $wnd.d3.select("#metricGraphTooltip").classed("hidden", true);
+                                $wnd.jQuery('#metricGraphTooltip').hide();
                             }
                         });
 
@@ -521,9 +521,9 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
                             showFullMetricBarHover(d);
                         }).on("mouseout", function (d) {
                             if (d.down || d.unknown || d.nodata) {
-                                $wnd.d3.select("#noDataTooltip").classed("hidden", true);
+                                $wnd.jQuery('#noDataTooltip').hide();
                             }else {
-                                $wnd.d3.select("#metricGraphTooltip").classed("hidden", true);
+                                $wnd.jQuery('#metricGraphTooltip').hide();
                             }
                         });
 
@@ -553,7 +553,7 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
 
 
                     //Show the tooltip
-                    $wnd.d3.select("#singleValueTooltip").classed("hidden", false);
+                    $wnd.jQuery('#singleValueTooltip').show();
                     setTimeout(function(){$wnd.jQuery('#singleValueTooltip').hide();},5000);
 
                 }
@@ -597,7 +597,7 @@ public class StackedBarMetricGraphImpl extends AbstractMetricGraph {
                         }).on("mouseover",function (d) {
                             showSingleValueMetricBarHover(d);
                         }).on("mouseout", function () {
-                            $wnd.d3.select("#singleValueTooltip").classed("hidden", true);
+                            $wnd.jQuery('#singleValueTooltip').hide();
                         });
             }
 
