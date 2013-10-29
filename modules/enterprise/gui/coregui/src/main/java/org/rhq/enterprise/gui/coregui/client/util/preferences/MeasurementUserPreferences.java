@@ -100,6 +100,10 @@ public class MeasurementUserPreferences {
         setMetricRangePreferences(prefs, true);
     }
 
+    public void setMetricRangePreferencesNoRefresh(MetricRangePreferences prefs) {
+        setMetricRangePreferences(prefs, false);
+    }
+
     /**
      * @param prefs The updated preferences
      * @param allowRefresh setting false will inhibit a preference change from calling CoreGui.refresh().  By

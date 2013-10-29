@@ -210,7 +210,7 @@ public class ButtonBarDateTimeRangeEditor extends EnhancedVLayout {
         if (null != prefs.begin && null != prefs.end && prefs.begin > prefs.end) {
             CoreGUI.getMessageCenter().notify(new Message(MSG.view_measureTable_startBeforeEnd()));
         } else {
-            measurementUserPreferences.setMetricRangePreferences(prefs, allowPreferenceUpdateRefresh);
+           measurementUserPreferences.setMetricRangePreferencesNoRefresh(prefs);
         }
 
     }

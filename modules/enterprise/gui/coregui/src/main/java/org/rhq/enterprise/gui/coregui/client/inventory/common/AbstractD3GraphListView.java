@@ -88,7 +88,9 @@ public abstract class AbstractD3GraphListView extends EnhancedVLayout implements
         if (isVisible() && !isRefreshing()) {
             isRefreshing = true;
             try {
-                buttonBarDateTimeRangeEditor.updateTimeRangeToNow();
+                if(!buttonBarDateTimeRangeEditor.isCustomTimeRangeActive()){
+                    buttonBarDateTimeRangeEditor.updateTimeRangeToNow();
+                }
                 refreshData();
             } finally {
                 isRefreshing = false;
