@@ -49,10 +49,12 @@ import org.rhq.core.domain.measurement.MeasurementUnits;
 import org.rhq.core.domain.measurement.composite.MeasurementDataNumericHighLowComposite;
 import org.rhq.core.domain.measurement.ui.MetricDisplaySummary;
 import org.rhq.core.domain.measurement.ui.MetricDisplayValue;
+import org.rhq.core.domain.resource.Resource;
 import org.rhq.core.domain.resource.group.ResourceGroup;
+import org.rhq.core.domain.resource.group.composite.ResourceGroupComposite;
 import org.rhq.coregui.client.CoreGUI;
-import org.rhq.coregui.client.UserSessionManager;
 import org.rhq.coregui.client.gwt.GWTServiceLookup;
+import org.rhq.coregui.client.inventory.common.graph.CustomDateRangeState;
 import org.rhq.coregui.client.util.BrowserUtility;
 import org.rhq.coregui.client.util.Log;
 import org.rhq.coregui.client.util.MeasurementConverterClient;
@@ -60,7 +62,6 @@ import org.rhq.coregui.client.util.MeasurementUtility;
 import org.rhq.coregui.client.util.RPCDataSource;
 import org.rhq.coregui.client.util.async.Command;
 import org.rhq.coregui.client.util.async.CountDownLatch;
-import org.rhq.coregui.client.util.preferences.MeasurementUserPreferences;
 
 /**
  * A simple data source to read in metric data summaries for a resource.
@@ -86,20 +87,18 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
     public static final String FIELD_METRIC_SCHED_ID = "schedId";
     public static final String FIELD_METRIC_UNITS = "units";
     public static final String FIELD_METRIC_NAME = "name";
-    public static final String FIELD_RESOURCE_ID = "resourceId";
+    public static final String FIELD_RESOURCE_GROUP_ID = "resourceGroupId";
 
-    private final ResourceGroup resourceGroup;
+    private final ResourceGroupComposite groupComposite;
     private List<MetricDisplaySummary> metricDisplaySummaries;
     private List<List<MeasurementDataNumericHighLowComposite>> metricsDataList;
     private Set<MeasurementData> liveMeasurementDataSet;
     private int[] definitionArrayIds;
     private int[] scheduleIds;
     private HashMap<Integer, MeasurementUnits> scheduleToMeasurementUnitMap = new HashMap<Integer, MeasurementUnits>();
-    private final MeasurementUserPreferences measurementUserPrefs;
 
-    public MetricsGroupViewDataSource(ResourceGroup resourceGroup) {
-        this.resourceGroup = resourceGroup;
-        measurementUserPrefs = new MeasurementUserPreferences(UserSessionManager.getUserPreferences());
+    public MetricsGroupViewDataSource(ResourceGroupComposite groupComposite) {
+        this.groupComposite = groupComposite;
     }
 
     /**
@@ -118,7 +117,7 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
                 if (value == null) {
                     return "";
                 }
-                String contents = "<span id='sparkline_" + resourceGroup.getId() + "-"
+                String contents = "<span id='sparkline_" + groupComposite.getResourceGroup().getId() + "-"
                         + record.getAttributeAsInt(FIELD_METRIC_DEF_ID) + "' class='dynamicsparkline' width='70' "
                         + "values='" + record.getAttribute(FIELD_SPARKLINE) + "'></span>";
                 return contents;
@@ -181,7 +180,7 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
         record.setAttribute(FIELD_METRIC_SCHED_ID, from.getScheduleId());
         record.setAttribute(FIELD_METRIC_UNITS, from.getUnits());
         record.setAttribute(FIELD_METRIC_NAME, from.getMetricName());
-        record.setAttribute(FIELD_RESOURCE_ID, resourceGroup.getId());
+        record.setAttribute(FIELD_RESOURCE_GROUP_ID, groupComposite.getResourceGroup().getId());
         return record;
     }
 
@@ -244,8 +243,6 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
             }
         }
 
-        Log.debug("\n\nmetricDataList ");
-        Log.debug("metricDataList: "+metricsDataList.size());
         return metricsDataList.get(selectedIndex);
     }
 
@@ -262,7 +259,7 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
     @Override
     protected void executeFetch(final DSRequest request, final DSResponse response, final Criteria unused) {
 
-        GWTServiceLookup.getMeasurementScheduleService().findSchedulesForResourceAndType(resourceGroup.getId(),
+        GWTServiceLookup.getMeasurementScheduleService().findSchedulesForResourceAndType(groupComposite.getResourceGroup().getId(),
                 DataType.MEASUREMENT, null, true, new AsyncCallback<ArrayList<MeasurementSchedule>>() {
             @Override
             public void onSuccess(ArrayList<MeasurementSchedule> measurementSchedules) {
@@ -286,11 +283,11 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
                     }
                 });
 
-                queryResourceMetrics(resourceGroup, measurementUserPrefs.getMetricRangePreferences().begin,
-                        measurementUserPrefs.getMetricRangePreferences().end, countDownLatch);
+                queryResourceGroupMetrics(groupComposite.getResourceGroup(), CustomDateRangeState.getInstance().getStartTime(),
+                        CustomDateRangeState.getInstance().getEndTime(), countDownLatch);
 
-                queryMetricDisplaySummaries(scheduleIds, measurementUserPrefs.getMetricRangePreferences().begin,
-                        measurementUserPrefs.getMetricRangePreferences().end, countDownLatch);
+                queryMetricDisplaySummaries(scheduleIds, CustomDateRangeState.getInstance().getStartTime(),
+                        CustomDateRangeState.getInstance().getEndTime(), countDownLatch);
             }
 
             @Override
@@ -302,47 +299,56 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
 
     private void queryLiveMetrics(final DSRequest request, final DSResponse response) {
 
+        // boolean isAutogroup = groupComposite.getResourceGroup().getAutoGroupParentResource() != null;
+        final Set<Resource> resources = groupComposite.getResourceGroup().getExplicitResources();
+        int resourceIds[] = new int[resources.size()];
+        int i = 0;
+        for (Resource resource : resources) {
+            resourceIds[i] = resource.getId();
+           i++;
+        }
+
         // actually go out and ask the agents for the data
-        GWTServiceLookup.getMeasurementDataService(60000).findLiveData(resourceGroup.getId(), definitionArrayIds,
-            new AsyncCallback<Set<MeasurementData>>() {
-                @Override
-                public void onSuccess(Set<MeasurementData> result) {
-                    if (result == null) {
-                        result = new HashSet<MeasurementData>(0);
-                    }
-                    liveMeasurementDataSet = result;
-                    response.setData(buildRecords(metricDisplaySummaries));
-                    processResponse(request.getRequestId(), response);
-
-                    new Timer() {
-
-                        @Override
-                        public void run() {
-                            BrowserUtility.graphSparkLines();
+        GWTServiceLookup.getMeasurementDataService(60000).findLiveDataForGroup(groupComposite.getResourceGroup().getId(), resourceIds, definitionArrayIds,
+                new AsyncCallback<Set<MeasurementData>>() {
+                    @Override
+                    public void onSuccess(Set<MeasurementData> result) {
+                        if (result == null) {
+                            result = new HashSet<MeasurementData>(0);
                         }
-                    }.schedule(150);
-                }
+                        liveMeasurementDataSet = result;
+                        response.setData(buildRecords(metricDisplaySummaries));
+                        processResponse(request.getRequestId(), response);
 
-                /**
-                 * Called when an asynchronous call fails to complete normally. {@link IncompatibleRemoteServiceException}s, {@link
-                 * InvocationException}s, or checked exceptions thrown by the service method are examples of the type of failures that
-                 * can be passed to this method.
-                 * <p/>
-                 * <p> If <code>caught</code> is an instance of an {@link IncompatibleRemoteServiceException} the application should
-                 * try to get into a state where a browser refresh can be safely done. </p>
-                 *
-                 * @param caught failure encountered while executing a remote procedure call
-                 */
-                @Override
-                public void onFailure(Throwable caught) {
-                    CoreGUI.getErrorHandler().handleError("Cannot load metrics", caught);
-                }
-            });
+                        new Timer() {
+
+                            @Override
+                            public void run() {
+                                BrowserUtility.graphSparkLines();
+                            }
+                        }.schedule(150);
+                    }
+
+                    /**
+                     * Called when an asynchronous call fails to complete normally. {@link IncompatibleRemoteServiceException}s, {@link
+                     * InvocationException}s, or checked exceptions thrown by the service method are examples of the type of failures that
+                     * can be passed to this method.
+                     * <p/>
+                     * <p> If <code>caught</code> is an instance of an {@link IncompatibleRemoteServiceException} the application should
+                     * try to get into a state where a browser refresh can be safely done. </p>
+                     *
+                     * @param caught failure encountered while executing a remote procedure call
+                     */
+                    @Override
+                    public void onFailure(Throwable caught) {
+                        CoreGUI.getErrorHandler().handleError("Cannot load metrics", caught);
+                    }
+                });
     }
 
     private void queryMetricDisplaySummaries(int[] scheduleIds, Long startTime, Long endTime,
         final CountDownLatch countDownLatch) {
-        GWTServiceLookup.getMeasurementChartsService().getMetricDisplaySummariesForResource(resourceGroup.getId(),
+        GWTServiceLookup.getMeasurementChartsService().getMetricDisplaySummariesForResource(groupComposite.getResourceGroup().getId(),
             scheduleIds, startTime, endTime, new AsyncCallback<ArrayList<MetricDisplaySummary>>() {
                 @Override
                 public void onSuccess(ArrayList<MetricDisplaySummary> metricDisplaySummaries) {
@@ -364,7 +370,7 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
         this.metricDisplaySummaries = metricDisplaySummaries;
     }
 
-    private void queryResourceMetrics(final ResourceGroup resource, final Long startTime, final Long endTime,
+    private void queryResourceGroupMetrics(final ResourceGroup resource, final Long startTime, final Long endTime,
         final CountDownLatch countDownLatch) {
         HashSet<MeasurementDefinition> definitions = getMetricDefinitions(resource);
         if (definitions.size() == 0) {
@@ -420,9 +426,9 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
 
     }
 
-    private HashSet<MeasurementDefinition> getMetricDefinitions(ResourceGroup resource) {
+    private HashSet<MeasurementDefinition> getMetricDefinitions(ResourceGroup resourceGroup) {
         HashSet<MeasurementDefinition> definitions = new HashSet<MeasurementDefinition>();
-        for (MeasurementDefinition measurementDefinition : resource.getResourceType().getMetricDefinitions()) {
+        for (MeasurementDefinition measurementDefinition : resourceGroup.getResourceType().getMetricDefinitions()) {
             if (measurementDefinition.getDataType() == MEASUREMENT || measurementDefinition.getDataType() == COMPLEX) {
                 definitions.add(measurementDefinition);
             }

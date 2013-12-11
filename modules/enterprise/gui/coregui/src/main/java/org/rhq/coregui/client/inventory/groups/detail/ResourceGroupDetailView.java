@@ -330,20 +330,10 @@ public class ResourceGroupDetailView extends
                 showOnPage = visible;
             }
 
-//            viewFactory = (!showOnPage) ? null : new ViewFactory() {
-//                @Override
-//                public Canvas createView() {
-//                    return createD3GraphListView();
-//                }
-//            };
-//
-//            updateSubTab(this.monitoringTab, this.monitorGraphs, visible, true, viewFactory);
-
-
             viewFactory = (!showOnPage) ? null : new ViewFactory() {
                 @Override
                 public Canvas createView() {
-                    return MetricsGroupView.create(groupComposite.getResourceGroup());
+                    return MetricsGroupView.create(groupComposite);
                 }
             };
 

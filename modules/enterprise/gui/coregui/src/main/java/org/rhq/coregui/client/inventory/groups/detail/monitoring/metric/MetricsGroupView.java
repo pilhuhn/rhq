@@ -32,6 +32,7 @@ import com.smartgwt.client.widgets.events.ClickHandler;
 import org.rhq.core.domain.common.EntityContext;
 import org.rhq.core.domain.measurement.Availability;
 import org.rhq.core.domain.resource.group.ResourceGroup;
+import org.rhq.core.domain.resource.group.composite.ResourceGroupComposite;
 import org.rhq.coregui.client.CoreGUI;
 import org.rhq.coregui.client.IconEnum;
 import org.rhq.coregui.client.gwt.GWTServiceLookup;
@@ -49,16 +50,16 @@ import org.rhq.coregui.client.util.enhanced.EnhancedHLayout;
  * The consolidated metrics view showing metric graphs and availability data both in graphical and tabular form.
  * @author Mike Thompson
  */
-public class MetricsGroupView<T extends ResourceGroup> extends AbstractD3GraphListView implements
+public class MetricsGroupView extends AbstractD3GraphListView implements
     AbstractTwoLevelTabSetView.ViewRenderedListener {
 
     private static final String COLLAPSED_TOOLTIP = MSG.chart_metrics_collapse_tooltip();
     private static final String EXPANDED_TOOLTIP = MSG.chart_metrics_expand_tooltip();
 
-    private final T resourceGroup;
+    private final ResourceGroup resourceGroup;
     private EnhancedHLayout expandCollapseHLayout;
     private MetricsGroupTableView metricsTableView;
-    private static Integer lastResourceId = 0;
+    private static Integer lastResourceGroupId = 0;
 
     /**
      * Encapsulate the creation logic and not let it leak out into other objects.
@@ -67,9 +68,9 @@ public class MetricsGroupView<T extends ResourceGroup> extends AbstractD3GraphLi
      * @param group
      * @return MetricsGroupView
      */
-    public static MetricsGroupView create(ResourceGroup group ){
+    public static MetricsGroupView create(ResourceGroupComposite group ){
 
-        boolean isDifferentResource = (group.getId() != lastResourceId);
+        boolean isDifferentResource = (group.getResourceGroup().getId() != lastResourceGroupId);
 
         if(isDifferentResource){
             ExpandedRowsMomento.getInstance().clear();
@@ -79,13 +80,13 @@ public class MetricsGroupView<T extends ResourceGroup> extends AbstractD3GraphLi
 
     }
 
-    private MetricsGroupView(T resourceGroup, Set<Integer> expandedRows) {
+    private MetricsGroupView(ResourceGroupComposite resourceGroupComposite, Set<Integer> expandedRows) {
         super();
         setOverflow(Overflow.AUTO);
         setWidth100();
         setHeight100();
-        this.resourceGroup = resourceGroup;
-        metricsTableView = new MetricsGroupTableView(resourceGroup, this, expandedRows);
+        this.resourceGroup = resourceGroupComposite.getResourceGroup();
+        metricsTableView = new MetricsGroupTableView(resourceGroupComposite, this, expandedRows);
 
         final MetricAvailabilityView availabilityDetails = new MetricAvailabilityView(resourceGroup.getId());
         availabilityDetails.hide();
@@ -125,12 +126,12 @@ public class MetricsGroupView<T extends ResourceGroup> extends AbstractD3GraphLi
         addMember(expandCollapseHLayout);
         addMember(availabilityDetails);
         addMember(metricsTableView);
-        lastResourceId = resourceGroup.getId();
+        lastResourceGroupId = resourceGroup.getId();
     }
 
 
     private void addAvailabilityGraph() {
-        if(lastResourceId.equals(resourceGroup.getId())) {
+        if(lastResourceGroupId.equals(resourceGroup.getId())) {
             expandCollapseHLayout.removeMember(availabilityGraph);
             availabilityGraph.destroy();
 
@@ -138,7 +139,7 @@ public class MetricsGroupView<T extends ResourceGroup> extends AbstractD3GraphLi
 
             expandCollapseHLayout.addMember(availabilityGraph);
 
-            queryAvailability(EntityContext.forResource(resourceGroup.getId()), buttonBarDateTimeRangeEditor.getStartTime(),
+            queryAvailability(EntityContext.forGroup(resourceGroup.getId()), buttonBarDateTimeRangeEditor.getStartTime(),
                 buttonBarDateTimeRangeEditor.getEndTime(), null);
         }
     }
