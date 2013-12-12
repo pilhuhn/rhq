@@ -333,7 +333,7 @@ public class ResourceGroupDetailView extends
             viewFactory = (!showOnPage) ? null : new ViewFactory() {
                 @Override
                 public Canvas createView() {
-                    return MetricsGroupView.create(groupComposite);
+                    return MetricsGroupView.create(groupComposite.getResourceGroup());
                 }
             };
 

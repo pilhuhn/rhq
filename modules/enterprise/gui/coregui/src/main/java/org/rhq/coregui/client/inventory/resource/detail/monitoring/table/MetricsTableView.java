@@ -235,7 +235,7 @@ public class MetricsTableView extends Table<MetricsViewDataSource> implements Re
 
     private void storeDashboardMetric(Dashboard dashboard, Resource resource, MeasurementDefinition definition) {
         DashboardPortlet dashboardPortlet = new DashboardPortlet(MSG.view_tree_common_contextMenu_resourceGraph(),
-            ResourceD3GraphPortlet.KEY, 200);
+            ResourceD3GraphPortlet.KEY, 260);
         dashboardPortlet.getConfiguration().put(
             new PropertySimple(ResourceD3GraphPortlet.CFG_RESOURCE_ID, resource.getId()));
         dashboardPortlet.getConfiguration().put(

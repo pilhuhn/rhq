@@ -59,19 +59,16 @@ import org.rhq.core.domain.dashboard.DashboardPortlet;
 import org.rhq.core.domain.measurement.MeasurementDefinition;
 import org.rhq.core.domain.measurement.composite.MeasurementDataNumericHighLowComposite;
 import org.rhq.core.domain.resource.group.ResourceGroup;
-import org.rhq.core.domain.resource.group.composite.ResourceGroupComposite;
 import org.rhq.core.domain.util.PageList;
 import org.rhq.coregui.client.CoreGUI;
 import org.rhq.coregui.client.components.table.Table;
 import org.rhq.coregui.client.dashboard.portlets.inventory.groups.graph.ResourceGroupD3GraphPortlet;
-import org.rhq.coregui.client.dashboard.portlets.inventory.resource.graph.ResourceD3GraphPortlet;
 import org.rhq.coregui.client.gwt.GWTServiceLookup;
 import org.rhq.coregui.client.inventory.common.AbstractD3GraphListView;
 import org.rhq.coregui.client.inventory.common.graph.CustomDateRangeState;
 import org.rhq.coregui.client.inventory.common.graph.MetricGraphData;
 import org.rhq.coregui.client.inventory.common.graph.Refreshable;
 import org.rhq.coregui.client.inventory.common.graph.graphtype.StackedBarMetricGraphImpl;
-import org.rhq.coregui.client.inventory.groups.detail.D3GroupGraphListView;
 import org.rhq.coregui.client.inventory.resource.detail.monitoring.MetricD3Graph;
 import org.rhq.coregui.client.util.BrowserUtility;
 import org.rhq.coregui.client.util.Log;
@@ -97,14 +94,14 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
     private MetricsTableListGrid metricsTableListGrid;
     private int selectedMetricDefinitionId;
 
-    public MetricsGroupTableView(ResourceGroupComposite resourceGroupComposite, AbstractD3GraphListView abstractD3GraphListView,
-                                 Set<Integer> expandedRows) {
+    public MetricsGroupTableView(ResourceGroup resourceGroup, AbstractD3GraphListView abstractD3GraphListView,
+        Set<Integer> expandedRows) {
         super();
-        this.resourceGroup = resourceGroupComposite.getResourceGroup();
+        this.resourceGroup = resourceGroup;
         this.abstractD3GraphListView = abstractD3GraphListView;
         dashboardMenuMap = new LinkedHashMap<String, String>();
         dashboardMap = new LinkedHashMap<Integer, Dashboard>();
-        setDataSource(new MetricsGroupViewDataSource(resourceGroupComposite));
+        setDataSource(new MetricsGroupViewDataSource(resourceGroup));
         this.expandedRows = expandedRows;
     }
 
@@ -175,7 +172,8 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
         addToDashboardButton.addClickHandler(new com.smartgwt.client.widgets.events.ClickHandler() {
             @Override
             public void onClick(ClickEvent clickEvent) {
-                for (MeasurementDefinition measurementDefinition : resourceGroup.getResourceType().getMetricDefinitions()) {
+                for (MeasurementDefinition measurementDefinition : resourceGroup.getResourceType()
+                    .getMetricDefinitions()) {
                     if (measurementDefinition.getId() == selectedMetricDefinitionId) {
                         Log.debug("Add to Dashboard -- Storing: " + measurementDefinition.getDisplayName() + " in "
                             + selectedDashboard.getName());
@@ -238,26 +236,24 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
     }
 
     private void storeDashboardMetric(Dashboard dashboard, int resourceGroupId, MeasurementDefinition definition) {
-        DashboardPortlet dashboardPortlet = new DashboardPortlet(MSG.view_tree_common_contextMenu_resourceGraph(),
-            ResourceD3GraphPortlet.KEY, 200);
+
+        DashboardPortlet dashboardPortlet = new DashboardPortlet(MSG.view_tree_common_contextMenu_groupGraph(),
+            ResourceGroupD3GraphPortlet.KEY, 260);
         dashboardPortlet.getConfiguration().put(
             new PropertySimple(ResourceGroupD3GraphPortlet.CFG_RESOURCE_GROUP_ID, resourceGroupId));
-        dashboardPortlet.getConfiguration().put(
-            new PropertySimple(ResourceGroupD3GraphPortlet.CFG_DEFINITION_ID, definition.getId()));
+        dashboardPortlet.getConfiguration().put(new PropertySimple(ResourceGroupD3GraphPortlet.CFG_DEFINITION_ID, definition.getId()));
 
         dashboard.addPortlet(dashboardPortlet);
 
         GWTServiceLookup.getDashboardService().storeDashboard(dashboard, new AsyncCallback<Dashboard>() {
-
             public void onFailure(Throwable caught) {
                 CoreGUI.getErrorHandler().handleError(MSG.view_tree_common_contextMenu_saveChartToDashboardFailure(),
-                    caught);
+                        caught);
             }
 
             public void onSuccess(Dashboard result) {
-                CoreGUI.getMessageCenter().notify(
-                    new Message(MSG.view_tree_common_contextMenu_saveChartToDashboardSuccessful(result.getName()),
-                        Message.Severity.Info));
+                String msg = MSG.view_tree_common_contextMenu_saveChartToDashboardSuccessful(result.getName());
+                CoreGUI.getMessageCenter().notify(new Message(msg, Message.Severity.Info));
             }
         });
     }
@@ -318,7 +314,6 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
         }
 
         public void expandOpenedRows() {
-
             int startRow = 0;
             int endRow = this.getRecords().length;
             for (int i = startRow; i < endRow; i++) {
@@ -340,7 +335,8 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
          */
         protected Canvas getExpansionComponent(final ListGridRecord record) {
             final Integer definitionId = record.getAttributeAsInt(MetricsGroupViewDataSource.FIELD_METRIC_DEF_ID);
-            final Integer resourceGroupId = record.getAttributeAsInt(MetricsGroupViewDataSource.FIELD_RESOURCE_GROUP_ID);
+            final Integer resourceGroupId = record
+                .getAttributeAsInt(MetricsGroupViewDataSource.FIELD_RESOURCE_GROUP_ID);
             VLayout vLayout = new VLayout();
             vLayout.setPadding(5);
 
@@ -351,13 +347,14 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
 
             int[] definitionArrayIds = new int[1];
             definitionArrayIds[0] = definitionId;
-            GWTServiceLookup.getMeasurementDataService().findDataForCompatibleGroup(resourceGroupId, definitionArrayIds,
-                CustomDateRangeState.getInstance().getStartTime(), CustomDateRangeState.getInstance().getEndTime(),
-                NUM_METRIC_POINTS, new AsyncCallback<List<List<MeasurementDataNumericHighLowComposite>>>() {
+            GWTServiceLookup.getMeasurementDataService().findDataForCompatibleGroup(resourceGroupId,
+                definitionArrayIds, CustomDateRangeState.getInstance().getStartTime(),
+                CustomDateRangeState.getInstance().getEndTime(), NUM_METRIC_POINTS,
+                new AsyncCallback<List<List<MeasurementDataNumericHighLowComposite>>>() {
                     @Override
                     public void onFailure(Throwable caught) {
-                        Log.warn("Error retrieving recent metrics charting data for resource group [" + resourceGroupId + "]:"
-                            + caught.getMessage());
+                        Log.warn("Error retrieving recent metrics charting data for resource group [" + resourceGroupId
+                            + "]:" + caught.getMessage());
                     }
 
                     @Override
@@ -367,22 +364,16 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
                             //load the data results for the given metric definition
                             List<MeasurementDataNumericHighLowComposite> measurementList = results.get(0);
 
-                            Log.debug("\n*** MD count: "+group.getResourceType().getMetricDefinitions().size());
-                            Log.debug("\n*** MD id: "+definitionId);
-
-
                             MeasurementDefinition measurementDefinition = null;
                             for (MeasurementDefinition definition : group.getResourceType().getMetricDefinitions()) {
-                                Log.debug("\n*** MD name: "+definition.getName());
                                 if (definition.getId() == definitionId) {
                                     measurementDefinition = definition;
-                                    Log.debug("\n*** MD Found!!");
                                     break;
                                 }
                             }
 
                             MetricGraphData metricGraphData = MetricGraphData.createForResourceGroup(group.getId(),
-                                    group.getName(), measurementDefinition, measurementList);
+                                group.getName(), measurementDefinition, measurementList);
                             metricGraphData.setHideLegend(true);
 
                             StackedBarMetricGraphImpl graph = GWT.create(StackedBarMetricGraphImpl.class);
@@ -397,7 +388,8 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
                             }.schedule(150);
 
                         } else {
-                            Log.warn("No chart data retrieving for resource group [" + resourceGroupId + "-" + definitionId + "]");
+                            Log.warn("No chart data retrieving for resource group [" + resourceGroupId + "-"
+                                + definitionId + "]");
                         }
                     }
                 });
