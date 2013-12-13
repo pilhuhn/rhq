@@ -19,6 +19,9 @@
 
 package org.rhq.coregui.client.inventory.groups.detail.monitoring.metric;
 
+import static org.rhq.coregui.client.inventory.resource.detail.monitoring.table.MetricsGridFieldName.METRIC_DEF_ID;
+import static org.rhq.coregui.client.inventory.resource.detail.monitoring.table.MetricsGridFieldName.RESOURCE_GROUP_ID;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,6 +61,7 @@ import org.rhq.core.domain.dashboard.Dashboard;
 import org.rhq.core.domain.dashboard.DashboardPortlet;
 import org.rhq.core.domain.measurement.MeasurementDefinition;
 import org.rhq.core.domain.measurement.composite.MeasurementDataNumericHighLowComposite;
+import org.rhq.core.domain.resource.group.GroupCategory;
 import org.rhq.core.domain.resource.group.ResourceGroup;
 import org.rhq.core.domain.util.PageList;
 import org.rhq.coregui.client.CoreGUI;
@@ -73,9 +77,6 @@ import org.rhq.coregui.client.inventory.resource.detail.monitoring.MetricD3Graph
 import org.rhq.coregui.client.util.BrowserUtility;
 import org.rhq.coregui.client.util.Log;
 import org.rhq.coregui.client.util.message.Message;
-
-import static org.rhq.coregui.client.inventory.resource.detail.monitoring.table.MetricsGridFieldName.METRIC_DEF_ID;
-import static org.rhq.coregui.client.inventory.resource.detail.monitoring.table.MetricsGridFieldName.RESOURCE_GROUP_ID;
 
 /**
  * Views a resource's metrics in a tabular view with sparkline graph and optional detailed d3 graph.
@@ -125,11 +126,12 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
         metricsTableListGrid.addSelectionChangedHandler(new SelectionChangedHandler() {
             @Override
             public void onSelectionChanged(SelectionEvent selectionEvent) {
-                addToDashboardButton.enable();
-                ListGridRecord selectedRecord = selectionEvent.getSelectedRecord();
-                if (null != selectedRecord) {
-                    selectedMetricDefinitionId = selectedRecord
-                        .getAttributeAsInt(METRIC_DEF_ID.getValue());
+                if (resourceGroup.getGroupCategory() == GroupCategory.COMPATIBLE) {
+                    addToDashboardButton.enable();
+                    ListGridRecord selectedRecord = selectionEvent.getSelectedRecord();
+                    if (null != selectedRecord) {
+                        selectedMetricDefinitionId = selectedRecord.getAttributeAsInt(METRIC_DEF_ID.getValue());
+                    }
                 }
             }
         });
@@ -242,14 +244,15 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
             ResourceGroupD3GraphPortlet.KEY, 260);
         dashboardPortlet.getConfiguration().put(
             new PropertySimple(ResourceGroupD3GraphPortlet.CFG_RESOURCE_GROUP_ID, resourceGroupId));
-        dashboardPortlet.getConfiguration().put(new PropertySimple(ResourceGroupD3GraphPortlet.CFG_DEFINITION_ID, definition.getId()));
+        dashboardPortlet.getConfiguration().put(
+            new PropertySimple(ResourceGroupD3GraphPortlet.CFG_DEFINITION_ID, definition.getId()));
 
         dashboard.addPortlet(dashboardPortlet);
 
         GWTServiceLookup.getDashboardService().storeDashboard(dashboard, new AsyncCallback<Dashboard>() {
             public void onFailure(Throwable caught) {
                 CoreGUI.getErrorHandler().handleError(MSG.view_tree_common_contextMenu_saveChartToDashboardFailure(),
-                        caught);
+                    caught);
             }
 
             public void onSuccess(Dashboard result) {
@@ -288,7 +291,7 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
                 @Override
                 public void onRecordCollapse(RecordCollapseEvent recordCollapseEvent) {
                     metricsTableView.expandedRows.remove(recordCollapseEvent.getRecord().getAttributeAsInt(
-                            METRIC_DEF_ID.getValue()));
+                        METRIC_DEF_ID.getValue()));
                     refresh();
                     new Timer() {
                         @Override
@@ -320,8 +323,7 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
             for (int i = startRow; i < endRow; i++) {
                 ListGridRecord listGridRecord = getRecord(i);
                 if (null != listGridRecord) {
-                    int metricDefinitionId = listGridRecord
-                        .getAttributeAsInt(METRIC_DEF_ID.getValue());
+                    int metricDefinitionId = listGridRecord.getAttributeAsInt(METRIC_DEF_ID.getValue());
                     if (null != metricsTableView && null != expandedRows
                         && metricsTableView.expandedRows.contains(metricDefinitionId)) {
                         expandRecord(listGridRecord);
@@ -336,8 +338,7 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
          */
         protected Canvas getExpansionComponent(final ListGridRecord record) {
             final Integer definitionId = record.getAttributeAsInt(METRIC_DEF_ID.getValue());
-            final Integer resourceGroupId = record
-                .getAttributeAsInt(RESOURCE_GROUP_ID.getValue());
+            final Integer resourceGroupId = record.getAttributeAsInt(RESOURCE_GROUP_ID.getValue());
             VLayout vLayout = new VLayout();
             vLayout.setPadding(5);
 
@@ -384,7 +385,12 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
                                 @Override
                                 public void run() {
                                     graphView.drawJsniChart();
-                                    BrowserUtility.graphSparkLines();
+                                    new Timer() {
+                                        @Override
+                                        public void run() {
+                                            BrowserUtility.graphSparkLines();
+                                        }
+                                    }.schedule(150);
                                 }
                             }.schedule(150);
 
