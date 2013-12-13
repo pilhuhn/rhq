@@ -74,6 +74,9 @@ import org.rhq.coregui.client.util.BrowserUtility;
 import org.rhq.coregui.client.util.Log;
 import org.rhq.coregui.client.util.message.Message;
 
+import static org.rhq.coregui.client.inventory.resource.detail.monitoring.table.MetricsGridFieldName.METRIC_DEF_ID;
+import static org.rhq.coregui.client.inventory.resource.detail.monitoring.table.MetricsGridFieldName.RESOURCE_GROUP_ID;
+
 /**
  * Views a resource's metrics in a tabular view with sparkline graph and optional detailed d3 graph.
  *
@@ -125,10 +128,8 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
                 addToDashboardButton.enable();
                 ListGridRecord selectedRecord = selectionEvent.getSelectedRecord();
                 if (null != selectedRecord) {
-                    //Log.debug("Selected Metric Label: "
-                    //    + selectedRecord.getAttribute(MetricsViewDataSource.FIELD_METRIC_LABEL));
                     selectedMetricDefinitionId = selectedRecord
-                        .getAttributeAsInt(MetricsGroupViewDataSource.FIELD_METRIC_DEF_ID);
+                        .getAttributeAsInt(METRIC_DEF_ID.getValue());
                 }
             }
         });
@@ -278,7 +279,7 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
                 @Override
                 public void onRecordExpand(RecordExpandEvent recordExpandEvent) {
                     metricsTableView.expandedRows.add(recordExpandEvent.getRecord().getAttributeAsInt(
-                        MetricsGroupViewDataSource.FIELD_METRIC_DEF_ID));
+                        METRIC_DEF_ID.getValue()));
                     refreshData();
                 }
 
@@ -287,7 +288,7 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
                 @Override
                 public void onRecordCollapse(RecordCollapseEvent recordCollapseEvent) {
                     metricsTableView.expandedRows.remove(recordCollapseEvent.getRecord().getAttributeAsInt(
-                        MetricsGroupViewDataSource.FIELD_METRIC_DEF_ID));
+                            METRIC_DEF_ID.getValue()));
                     refresh();
                     new Timer() {
                         @Override
@@ -320,7 +321,7 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
                 ListGridRecord listGridRecord = getRecord(i);
                 if (null != listGridRecord) {
                     int metricDefinitionId = listGridRecord
-                        .getAttributeAsInt(MetricsGroupViewDataSource.FIELD_METRIC_DEF_ID);
+                        .getAttributeAsInt(METRIC_DEF_ID.getValue());
                     if (null != metricsTableView && null != expandedRows
                         && metricsTableView.expandedRows.contains(metricDefinitionId)) {
                         expandRecord(listGridRecord);
@@ -334,9 +335,9 @@ public class MetricsGroupTableView extends Table<MetricsGroupViewDataSource> imp
          * If you expand a grid row then create a graph.
          */
         protected Canvas getExpansionComponent(final ListGridRecord record) {
-            final Integer definitionId = record.getAttributeAsInt(MetricsGroupViewDataSource.FIELD_METRIC_DEF_ID);
+            final Integer definitionId = record.getAttributeAsInt(METRIC_DEF_ID.getValue());
             final Integer resourceGroupId = record
-                .getAttributeAsInt(MetricsGroupViewDataSource.FIELD_RESOURCE_GROUP_ID);
+                .getAttributeAsInt(RESOURCE_GROUP_ID.getValue());
             VLayout vLayout = new VLayout();
             vLayout.setPadding(5);
 

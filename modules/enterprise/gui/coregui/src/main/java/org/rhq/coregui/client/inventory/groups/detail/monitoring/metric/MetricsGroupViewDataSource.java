@@ -19,9 +19,6 @@
 
 package org.rhq.coregui.client.inventory.groups.detail.monitoring.metric;
 
-import static org.rhq.core.domain.measurement.DataType.COMPLEX;
-import static org.rhq.core.domain.measurement.DataType.MEASUREMENT;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -41,7 +38,6 @@ import com.smartgwt.client.widgets.grid.ListGridRecord;
 import org.rhq.core.domain.criteria.Criteria;
 import org.rhq.core.domain.measurement.MeasurementDefinition;
 import org.rhq.core.domain.measurement.composite.MeasurementDataNumericHighLowComposite;
-import org.rhq.core.domain.measurement.ui.MetricDisplayConstants;
 import org.rhq.core.domain.measurement.ui.MetricDisplaySummary;
 import org.rhq.core.domain.measurement.ui.MetricDisplayValue;
 import org.rhq.core.domain.resource.group.ResourceGroup;
@@ -55,6 +51,10 @@ import org.rhq.coregui.client.util.RPCDataSource;
 import org.rhq.coregui.client.util.async.Command;
 import org.rhq.coregui.client.util.async.CountDownLatch;
 
+import static org.rhq.core.domain.measurement.DataType.COMPLEX;
+import static org.rhq.core.domain.measurement.DataType.MEASUREMENT;
+import static org.rhq.coregui.client.inventory.resource.detail.monitoring.table.MetricsGridFieldName.*;
+
 /**
  * A simple data source to read in metric data summaries for a resource.
  * This doesn't support paging - everything is returned in one query. Since
@@ -67,18 +67,6 @@ import org.rhq.coregui.client.util.async.CountDownLatch;
 public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySummary, Criteria> {
 
     private static final int NUMBER_OF_METRIC_POINTS = 60;
-
-    public static final String FIELD_SPARKLINE = "sparkline";
-    public static final String FIELD_METRIC_LABEL = "label";
-    public static final String FIELD_ALERT_COUNT = "alertCount";
-    public static final String FIELD_MIN_VALUE = "min";
-    public static final String FIELD_MAX_VALUE = "max";
-    public static final String FIELD_AVG_VALUE = "avg";
-    public static final String FIELD_METRIC_DEF_ID = "defId";
-    public static final String FIELD_METRIC_SCHED_ID = "schedId";
-    public static final String FIELD_METRIC_UNITS = "units";
-    public static final String FIELD_METRIC_NAME = "name";
-    public static final String FIELD_RESOURCE_GROUP_ID = "resourceGroupId";
 
     private final ResourceGroup resourceGroup;
     private List<MetricDisplaySummary> metricDisplaySummaries;
@@ -98,7 +86,7 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
     public ArrayList<ListGridField> getListGridFields() {
         ArrayList<ListGridField> fields = new ArrayList<ListGridField>(7);
 
-        ListGridField sparklineField = new ListGridField(FIELD_SPARKLINE, MSG.chart_metrics_sparkline_header());
+        ListGridField sparklineField = new ListGridField(SPARKLINE.getValue(), MSG.chart_metrics_sparkline_header());
         sparklineField.setCellFormatter(new CellFormatter() {
             @Override
             public String format(Object value, ListGridRecord record, int rowNum, int colNum) {
@@ -106,8 +94,8 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
                     return "";
                 }
                 String contents = "<span id='sparkline_" + resourceGroup.getId() + "-"
-                    + record.getAttributeAsInt(FIELD_METRIC_DEF_ID) + "' class='dynamicsparkline' width='70' "
-                    + "values='" + record.getAttribute(FIELD_SPARKLINE) + "'></span>";
+                    + record.getAttributeAsInt(METRIC_DEF_ID.getValue()) + "' class='dynamicsparkline' width='70' "
+                    + "values='" + record.getAttribute(SPARKLINE.getValue()) + "'></span>";
                 return contents;
 
             }
@@ -116,23 +104,23 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
         sparklineField.setWidth(80);
         fields.add(sparklineField);
 
-        ListGridField nameField = new ListGridField(FIELD_METRIC_LABEL, MSG.common_title_name());
+        ListGridField nameField = new ListGridField(METRIC_LABEL.getValue(), METRIC_LABEL.getLabel());
         nameField.setWidth("30%");
         fields.add(nameField);
 
-        ListGridField minField = new ListGridField(FIELD_MIN_VALUE, MSG.common_title_monitor_minimum());
+        ListGridField minField = new ListGridField(MIN_VALUE.getValue(), MIN_VALUE.getLabel());
         minField.setWidth("15%");
         fields.add(minField);
 
-        ListGridField maxField = new ListGridField(FIELD_MAX_VALUE, MSG.common_title_monitor_maximum());
+        ListGridField maxField = new ListGridField(MAX_VALUE.getValue(), MAX_VALUE.getLabel());
         maxField.setWidth("15%");
         fields.add(maxField);
 
-        ListGridField avgField = new ListGridField(FIELD_AVG_VALUE, MSG.common_title_monitor_average());
+        ListGridField avgField = new ListGridField(AVG_VALUE.getValue(), AVG_VALUE.getLabel());
         avgField.setWidth("15%");
         fields.add(avgField);
 
-        ListGridField alertsField = new ListGridField(FIELD_ALERT_COUNT, MSG.common_title_alerts());
+        ListGridField alertsField = new ListGridField(ALERT_COUNT.getValue(), ALERT_COUNT.getLabel());
         alertsField.setWidth("10%");
         fields.add(alertsField);
 
@@ -153,17 +141,17 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
         MeasurementUtility.formatSimpleMetrics(from);
 
         ListGridRecord record = new ListGridRecord();
-        record.setAttribute(FIELD_SPARKLINE, getCsvMetricsForSparkline(from.getDefinitionId()));
-        record.setAttribute(FIELD_METRIC_LABEL, from.getLabel());
-        record.setAttribute(FIELD_ALERT_COUNT, String.valueOf(from.getAlertCount()));
-        record.setAttribute(FIELD_MIN_VALUE, getMetricStringValue(from.getMinMetric()));
-        record.setAttribute(FIELD_MAX_VALUE, getMetricStringValue(from.getMaxMetric()));
-        record.setAttribute(FIELD_AVG_VALUE, getMetricStringValue(from.getAvgMetric()));
-        record.setAttribute(FIELD_METRIC_DEF_ID, from.getDefinitionId());
-        record.setAttribute(FIELD_METRIC_SCHED_ID, from.getScheduleId());
-        record.setAttribute(FIELD_METRIC_UNITS, from.getUnits());
-        record.setAttribute(FIELD_METRIC_NAME, from.getMetricName());
-        record.setAttribute(FIELD_RESOURCE_GROUP_ID, resourceGroup.getId());
+        record.setAttribute(SPARKLINE.getValue(), getCsvMetricsForSparkline(from.getDefinitionId()));
+        record.setAttribute(METRIC_LABEL.getValue(), from.getLabel());
+        record.setAttribute(ALERT_COUNT.getValue(), String.valueOf(from.getAlertCount()));
+        record.setAttribute(MIN_VALUE.getValue(), getMetricStringValue(from.getMinMetric()));
+        record.setAttribute(MAX_VALUE.getValue(), getMetricStringValue(from.getMaxMetric()));
+        record.setAttribute(AVG_VALUE.getValue(), getMetricStringValue(from.getAvgMetric()));
+        record.setAttribute(METRIC_DEF_ID.getValue(), from.getDefinitionId());
+        record.setAttribute(METRIC_SCHEDULE_ID.getValue(), from.getScheduleId());
+        record.setAttribute(METRIC_UNITS.getValue(), from.getUnits());
+        record.setAttribute(METRIC_NAME.getValue(), from.getMetricName());
+        record.setAttribute(RESOURCE_GROUP_ID.getValue(), resourceGroup.getId());
         return record;
     }
 
@@ -231,7 +219,7 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
             }
         });
 
-        organizeMeasurementDefitionOrder(resourceGroup);
+        organizeMeasurementDefinitionOrder(resourceGroup);
         queryMetricDisplaySummaries(definitionArrayIds, CustomDateRangeState.getInstance().getStartTime(),
             CustomDateRangeState.getInstance().getEndTime(), countDownLatch);
 
@@ -267,7 +255,7 @@ public class MetricsGroupViewDataSource extends RPCDataSource<MetricDisplaySumma
 
     }
 
-    private void organizeMeasurementDefitionOrder(ResourceGroup resourceGroup) {
+    private void organizeMeasurementDefinitionOrder(ResourceGroup resourceGroup) {
         Set<MeasurementDefinition> definitions = getMetricDefinitions(resourceGroup);
 
         //build id mapping for measurementDefinition instances Ex. Free Memory -> MeasurementDefinition[100071]
