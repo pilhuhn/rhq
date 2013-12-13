@@ -131,7 +131,6 @@ public class MetricsGroupView extends AbstractD3GraphListView implements
 
 
     private void addAvailabilityGraph() {
-        if(lastResourceGroupId.equals(resourceGroup.getId())) {
             expandCollapseHLayout.removeMember(availabilityGraph);
             availabilityGraph.destroy();
 
@@ -141,7 +140,6 @@ public class MetricsGroupView extends AbstractD3GraphListView implements
 
             queryAvailability(EntityContext.forGroup(resourceGroup.getId()), CustomDateRangeState.getInstance().getStartTime(),
                 CustomDateRangeState.getInstance().getEndTime(), null);
-        }
     }
 
 

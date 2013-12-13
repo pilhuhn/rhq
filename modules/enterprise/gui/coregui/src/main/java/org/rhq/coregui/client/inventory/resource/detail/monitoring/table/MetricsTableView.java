@@ -176,7 +176,7 @@ public class MetricsTableView extends Table<MetricsViewDataSource> implements Re
                     if (measurementDefinition.getId() == selectedMetricDefinitionId) {
                         Log.debug("Add to Dashboard -- Storing: " + measurementDefinition.getDisplayName() + " in "
                             + selectedDashboard.getName());
-                        storeDashboardMetric(selectedDashboard, resource, measurementDefinition);
+                        storeDashboardMetric(selectedDashboard, resource.getId(), measurementDefinition);
                         break;
                     }
                 }
@@ -233,11 +233,11 @@ public class MetricsTableView extends Table<MetricsViewDataSource> implements Re
             });
     }
 
-    private void storeDashboardMetric(Dashboard dashboard, Resource resource, MeasurementDefinition definition) {
+    private void storeDashboardMetric(Dashboard dashboard, int resourceId, MeasurementDefinition definition) {
         DashboardPortlet dashboardPortlet = new DashboardPortlet(MSG.view_tree_common_contextMenu_resourceGraph(),
             ResourceD3GraphPortlet.KEY, 260);
         dashboardPortlet.getConfiguration().put(
-            new PropertySimple(ResourceD3GraphPortlet.CFG_RESOURCE_ID, resource.getId()));
+            new PropertySimple(ResourceD3GraphPortlet.CFG_RESOURCE_ID, resourceId));
         dashboardPortlet.getConfiguration().put(
             new PropertySimple(ResourceD3GraphPortlet.CFG_DEFINITION_ID, definition.getId()));
 
