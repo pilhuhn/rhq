@@ -91,6 +91,7 @@ public class Simulator implements ShutdownManager {
         metricsServer.setAggregationBatchSize(plan.getAggregationBatchSize());
         metricsServer.setUseAsyncAggregation(plan.getAggregationType() == SimulationPlan.AggregationType.ASYNC);
         metricsServer.setDateTimeService(plan.getDateTimeService());
+        metricsServer.init(0, plan.getBatchSize() * plan.getNumMeasurementCollectors());
     }
 
     /**
@@ -107,7 +108,7 @@ public class Simulator implements ShutdownManager {
         Random random = new Random();
         long timestamp = plan.getDateTimeService().nowInMillis();
         long endOfSimulation = timestamp + 24L * 60 * 60 * 1000 * plan.getSimulationTime();
-        long numberOfMetrics = plan.getBatchSize() * plan.getNumMeasurementCollectors();
+        int numberOfMetrics = plan.getBatchSize() * plan.getNumMeasurementCollectors();
 
         Set<MeasurementDataNumeric> data = new HashSet<MeasurementDataNumeric>(plan.getBatchSize());
 
@@ -128,7 +129,7 @@ public class Simulator implements ShutdownManager {
             test.setCurrentHour(new DateTime(timestamp));
             if (currentTime.getHourOfDay() != lastAggregationHour) {
                 lastAggregationHour = currentTime.getHourOfDay();
-                test.calculateAggregates();
+                test.calculateAggregates(0, numberOfMetrics);
             }
         }
 
