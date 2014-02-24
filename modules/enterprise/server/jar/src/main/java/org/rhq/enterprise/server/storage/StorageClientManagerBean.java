@@ -70,6 +70,7 @@ import org.rhq.core.util.exception.ThrowableUtil;
 import org.rhq.enterprise.server.auth.SubjectManagerLocal;
 import org.rhq.enterprise.server.cloud.StorageNodeManagerLocal;
 import org.rhq.enterprise.server.core.CoreServer;
+import org.rhq.enterprise.server.measurement.MeasurementScheduleManagerLocal;
 import org.rhq.enterprise.server.system.SystemManagerLocal;
 import org.rhq.server.metrics.DateTimeService;
 import org.rhq.server.metrics.MetricsConfiguration;
@@ -100,6 +101,9 @@ public class StorageClientManagerBean {
 
     @EJB
     private CoreServer coreServer;
+
+    @EJB
+    private MeasurementScheduleManagerLocal measurementScheduleManager;
 
     @javax.annotation.Resource
     private TimerService timerService;
@@ -466,6 +470,11 @@ public class StorageClientManagerBean {
         DateTimeService dateTimeService = new DateTimeService();
         dateTimeService.setConfiguration(metricsConfiguration);
         metricsServer.setDateTimeService(dateTimeService);
-        metricsServer.init();
+        int[] ids = measurementScheduleManager.getMinAndMaxScheduleIds();
+        if (ids == null) {
+            metricsServer.init();
+        } else {
+            metricsServer.init(ids[0], ids[1]);
+        }
     }
 }
