@@ -171,7 +171,7 @@ public class MetricsServerTest extends MetricsTest {
         assertEquals(actual, expected, "Failed to retrieve raw metric data");
         assertColumnMetadataEquals(scheduleId, hour0.plusHours(4), hour0.plusHours(5), MetricsTable.RAW.getTTL(),
             timestamp);
-        assert1HourCacheEquals(hour(4), startScheduleId(scheduleId), expected);
+        assertRawHourCacheEquals(hour(4), startScheduleId(scheduleId), expected);
     }
 
     @Test(enabled = ENABLED)
@@ -241,16 +241,16 @@ public class MetricsServerTest extends MetricsTest {
             new AggregateNumericMetric(scheduleId, divide((1.1 + 2.2 + 3.3), 3),
                 firstValue, thirdValue, hour8.getMillis()));
         assert1HourDataEquals(scheduleId, expected);
-        assert6HourCacheEquals(hour(6), startScheduleId(scheduleId), expected);
+        assert1HourCacheEquals(hour(6), startScheduleId(scheduleId), expected);
 
         // The 6 hour data should not get aggregated since the current 6 hour time slice
         // has not passed yet. More specifically, the aggregation job is running at 09:00
         // which means that the current 6 hour slice is from 06:00 to 12:00.
         assert6HourDataEmpty(scheduleId);
-        assert24HourCacheEmpty(hour(0), startScheduleId(scheduleId));
+        assert6HourCacheEmpty(hour(0), startScheduleId(scheduleId));
 
         // verify that the 1 hour cache has been purged
-        assert1HourCacheEmpty(hour8, startScheduleId(scheduleId));
+        assertRawHourCacheEmpty(hour8, startScheduleId(scheduleId));
     }
 
     @Test(enabled = ENABLED)
@@ -276,8 +276,8 @@ public class MetricsServerTest extends MetricsTest {
 
         assert6HourDataEquals(scheduleId, asList(new AggregateNumericMetric(scheduleId, divide((avg1 + avg2), 2), min1,
             max1, hour(6).getMillis())));
-        assert6HourCacheEmpty(hour(6), startScheduleId(scheduleId));
-        assert24HourCacheEquals(hour(0), startScheduleId(scheduleId), asList(new AggregateNumericMetric(scheduleId,
+        assert1HourCacheEmpty(hour(6), startScheduleId(scheduleId));
+        assert6HourCacheEquals(hour(0), startScheduleId(scheduleId), asList(new AggregateNumericMetric(scheduleId,
             avg(avg1, avg2), Math.min(min1, min2), Math.max(max1, max2), hour(6).getMillis())));
         assert24HourDataEmpty(scheduleId);
     }
@@ -333,7 +333,7 @@ public class MetricsServerTest extends MetricsTest {
             new AggregateNumericMetric(scheduleId, hour14Avg, hour14Min, hour14Max, hour(14).getMillis())
         );
         assert1HourDataEquals(scheduleId, expectedOneHourData);
-        assert6HourCacheEquals(hour(12), startScheduleId(scheduleId), expectedOneHourData.subList(1, 2));
+        assert1HourCacheEquals(hour(12), startScheduleId(scheduleId), expectedOneHourData.subList(1, 2));
 
         // verify that we have 6 hour aggregates for hour 6. The data from the
         // 10:00 hour falls into the 6:00 - 12:00 time slice so we should have
@@ -341,7 +341,7 @@ public class MetricsServerTest extends MetricsTest {
         List<AggregateNumericMetric> expected6HourData = asList(new AggregateNumericMetric(scheduleId, hour10Avg,
             hour10Min, hour10Max, hour(6).getMillis()));
         assert6HourDataEquals(scheduleId, expected6HourData);
-        assert24HourCacheEquals(hour(0), startScheduleId(scheduleId), expected6HourData);
+        assert6HourCacheEquals(hour(0), startScheduleId(scheduleId), expected6HourData);
     }
 
     @Test(enabled = true)
@@ -390,7 +390,7 @@ public class MetricsServerTest extends MetricsTest {
         );
 
         assert1HourDataEquals(scheduleId, expectedOneHourData);
-        assert6HourCacheEquals(hour(6), startScheduleId(scheduleId), asList(new AggregateNumericMetric(scheduleId,
+        assert1HourCacheEquals(hour(6), startScheduleId(scheduleId), asList(new AggregateNumericMetric(scheduleId,
             hour8Avg, hour8Min, hour8Max, hour(8).getMillis())));
 
         // verify that we a 6 hour aggregate for the previous day's 18:00 - 00:00
@@ -398,7 +398,7 @@ public class MetricsServerTest extends MetricsTest {
         List<AggregateNumericMetric> execptected6HourData = asList(new AggregateNumericMetric(scheduleId,
             hour20YesterdayAvg, hour20YesterdayMin, hour20YesterdayMax, hour18Yesterday.getMillis()));
         assert6HourDataEquals(scheduleId, execptected6HourData);
-        assert24HourCacheEmpty(hour(0).minusDays(24), startScheduleId(scheduleId));
+        assert6HourCacheEmpty(hour(0).minusDays(24), startScheduleId(scheduleId));
 
         // verify that we have a 24 hour aggregate for the previous day's data
         assert24HourDataEquals(scheduleId, asList(new AggregateNumericMetric(scheduleId, hour20YesterdayAvg,
@@ -433,7 +433,7 @@ public class MetricsServerTest extends MetricsTest {
             min1, max2, hour(0).getMillis())));
 
         // verify that the 24 hour queue is updated
-        assert24HourCacheEmpty(hour(0), startScheduleId(scheduleId));
+        assert6HourCacheEmpty(hour(0), startScheduleId(scheduleId));
     }
 
     @Test//(enabled = ENABLED)
